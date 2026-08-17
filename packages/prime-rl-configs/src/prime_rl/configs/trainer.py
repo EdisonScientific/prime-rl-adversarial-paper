@@ -258,6 +258,13 @@ class ModelConfig(BaseModelConfig):
     fused_lm_head_token_chunk_size: int | Literal["disabled"] = 1024
     """Flattened token chunk size for the fused LM head. ``int >= 1`` sets the tokens per LM-head chunk explicitly; ``disabled`` uses the vanilla LM head. SFT training silently disables this (not supported yet)."""
 
+    @model_validator(mode="before")
+    @classmethod
+    def fold_legacy_model_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("fused_lm_head_token_chunk_size") == "auto":
+            data = {**data, "fused_lm_head_token_chunk_size": 1024}
+        return data
+
     @model_validator(mode="after")
     def trust_remote_code_only_with_hf(self):
         """Trust remote code only if the model is from HF."""
@@ -660,6 +667,16 @@ class TrainerConfig(BaseConfig):
 
     env_vars: EnvVars = {}
     """Extra environment variables for the trainer process(es). Merged on top of the launcher defaults."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def fold_legacy_loss_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        loss = data.get("loss")
+        if isinstance(loss, dict) and loss.get("type") == "binary_classifier":
+            data = {**data, "loss": {"type": "default", "kl_tau": 0.0}}
+        return data
 
     @model_validator(mode="after")
     def deepep_disables_grad_clipping(self):
