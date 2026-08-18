@@ -1,0 +1,217 @@
+output_dir = "/home/abou/data/rl/adv-grant-nih-32g235j-b1024r16-jb2048-kl5e2-glr2e7-jlr3e7-offpol0-max35k-dapo25to35k-tb1536-rpqwen3-rcfix-cliphi028-gate75-cleaneval-ficutlassmoe-8n-think-20260814"
+clean_output_dir = false
+generator_reward_mode = "judge"
+judge_objective = "single_candidate"
+
+[curriculum]
+enabled = false
+metric = "reward"
+threshold = 0.5
+window = 50
+min_steps_per_stage = 0
+min_metric_values = {}
+
+[log]
+level = "debug"
+
+[generator]
+max_steps = 10000
+seq_len = 8192
+
+[generator.model]
+name = "/tmp/qwen3-32b-hf"
+
+[generator.tokenizer]
+name = "/tmp/qwen3-32b-hf"
+trust_remote_code = false
+
+[generator.wandb]
+project = "grant-adversarial"
+entity = "edison-scientific"
+name = "adv-grant-nih-32g235j-b1024r16-jb2048-kl5e2-glr2e7-jlr3e7-offpol0-max35k-dapo25to35k-tb1536-rpqwen3-rcfix-cliphi028-gate75-cleaneval-ficutlassmoe-8n-think-20260814"
+
+[generator.weight_broadcast]
+type = "nccl"
+port = 30950
+timeout = 3600
+
+[generator.slurm]
+partition = "gpu"
+time = "14-00:00:00"
+
+[generator.deployment]
+type = "multi_node"
+gpus_per_node = 8
+num_train_nodes = 2
+num_infer_nodes = 1
+
+[generator.orchestrator]
+max_off_policy_steps = 0
+batch_size = 1024
+rollouts_per_example = 16
+
+[generator.orchestrator.eval]
+interval = 100
+num_examples = 128
+group_size = 1
+
+[generator.orchestrator.eval.sampling]
+temperature = 1.0
+max_completion_tokens = 3500
+top_p = 1.0
+extra_body = { thinking_token_budget = 1536, chat_template_kwargs = { enable_thinking = true } }
+
+[generator.orchestrator.client]
+base_url = ["http://localhost:8550/v1"]
+
+[generator.orchestrator.renderer]
+name = "default"
+
+[generator.orchestrator.train.sampling]
+temperature = 1.0
+max_completion_tokens = 3500
+top_p = 1.0
+top_k = -1
+min_p = 0.0
+extra_body = { thinking_token_budget = 1536, chat_template_kwargs = { enable_thinking = true } }
+
+[[generator.orchestrator.train.env]]
+id = "prime_rl.adversarial.envs"
+name = "adversarial_ether0_generator"
+args = { kind = "generator", task = "grant_abstract", dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_train_excl_eval128_seed1.jsonl", eval_dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_eval128_seed1.jsonl", num_examples = 50000, num_eval_examples = 128, seed = 1, answer_format = "tagged", min_abstract_words = 0, max_abstract_words = 1000000, max_abstract_chars = 1000000, min_abstract_sentences = 0, max_abstract_sentences = 1000000 }
+
+[generator.orchestrator.advantage]
+type = "default"
+
+[generator.orchestrator.advantage.length_penalty]
+type = "dapo_overlong"
+max_completion_tokens = 3500
+overlong_buffer_tokens = 1000
+penalty = 1.0
+
+[generator.trainer.loss]
+type = "default"
+kl_tau = 0.05
+dppo_mask_low = 0.20
+dppo_mask_high = 0.28
+
+[generator.trainer.optim]
+lr = 0.0000002
+
+[generator.trainer.model]
+impl = "hf"
+attn = "flash_attention_3"
+fused_lm_head_token_chunk_size = "auto"
+
+[generator.trainer.model.ac]
+mode = "full"
+freq = 1
+
+[generator.inference]
+gpu_memory_utilization = 0.85
+
+[generator.inference.parallel]
+tp = 8
+
+[generator.inference.server]
+port = 8850
+liveness_timeout_seconds = 180.0
+
+[generator.inference.model]
+max_model_len = 8192
+reasoning_parser = "qwen3"
+
+[generator.inference.vllm.reasoning_config]
+reasoning_start_str = "<think>"
+reasoning_end_str = "</think>"
+
+[judge]
+max_steps = 10000
+seq_len = 4096
+
+[judge.model]
+name = "/home/abou/data/cache/huggingface/hub/models--Qwen--Qwen3-235B-A22B/snapshots/8efa61729e24bd65b1d152b5ab5409052aa80e65"
+
+[judge.tokenizer]
+name = "/home/abou/data/cache/huggingface/hub/models--Qwen--Qwen3-235B-A22B/snapshots/8efa61729e24bd65b1d152b5ab5409052aa80e65"
+trust_remote_code = false
+
+[judge.wandb]
+project = "grant-adversarial"
+entity = "edison-scientific"
+name = "adv-grant-nih-32g235j-b1024r16-jb2048-kl5e2-glr2e7-jlr3e7-offpol0-max35k-dapo25to35k-tb1536-rpqwen3-rcfix-cliphi028-gate75-cleaneval-ficutlassmoe-8n-think-20260814"
+
+[judge.weight_broadcast]
+type = "nccl"
+port = 30955
+timeout = 3600
+
+[judge.slurm]
+partition = "gpu"
+time = "14-00:00:00"
+
+[judge.deployment]
+type = "multi_node"
+gpus_per_node = 8
+num_train_nodes = 4
+num_infer_nodes = 1
+
+[judge.orchestrator]
+max_off_policy_steps = 0
+batch_size = 2048
+rollouts_per_example = 1
+
+[judge.orchestrator.client]
+base_url = ["http://localhost:8555/v1"]
+
+[judge.orchestrator.renderer]
+name = "default"
+
+[judge.orchestrator.train.sampling]
+temperature = 0.0
+max_completion_tokens = 1
+extra_body = { chat_template_kwargs = { enable_thinking = false }, structured_outputs = { choice = ["A", "B"] } }
+
+[[judge.orchestrator.train.env]]
+id = "prime_rl.adversarial.envs"
+name = "adversarial_judge"
+args = { kind = "judge" }
+
+[judge.trainer]
+dist_timeout_seconds = 7200
+
+[judge.trainer.optim]
+lr = 0.0000003
+
+[judge.trainer.loss]
+type = "binary_classifier"
+positive_token = "A"
+negative_token = "B"
+
+[judge.trainer.model]
+impl = "custom"
+fused_lm_head_token_chunk_size = "disabled"
+optim_cpu_offload = true
+
+[judge.trainer.model.ac]
+freq = 1
+
+[judge.inference.parallel]
+tp = 8
+
+[judge.inference.server]
+port = 8855
+liveness_timeout_seconds = 180.0
+
+[judge.inference.model]
+max_model_len = 4096
+
+[judge.inference.vllm]
+moe_backend = "flashinfer_cutlass"
+
+[judge_update_gate]
+enabled = true
+accuracy_threshold = 0.75
+ema_decay = 0.95
+warmup_steps = 0
+max_skip_streak = 50

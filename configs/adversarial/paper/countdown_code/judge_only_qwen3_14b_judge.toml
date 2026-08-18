@@ -1,0 +1,173 @@
+output_dir = "/home/abou/data/rl/adversarial-countdown-code-judge-qwen3-1p7bgen-14bjudge-b64r8-nccl-jctx2k-max8192-seq16k-train15k-eval800-eval250-step0eval-stablehparams-10k-d14d-v1"
+clean_output_dir = false
+generator_reward_mode = "judge"
+judge_objective = "single_candidate"
+
+[log]
+level = "debug"
+
+[generator]
+max_steps = 10000
+seq_len = 16384
+
+[generator.model]
+name = "Qwen/Qwen3-1.7B"
+
+[generator.wandb]
+project = "countdown-code-adversarial"
+entity = "edison-scientific"
+name = "adversarial-countdown-code-judge-qwen3-1p7bgen-14bjudge-b64r8-nccl-jctx2k-max8192-seq16k-train15k-eval800-eval250-step0eval-stablehparams-10k-d14d-v1"
+
+[generator.weight_broadcast]
+type = "nccl"
+port = 29511
+timeout = 3600
+
+[generator.deployment]
+type = "single_node"
+gpus_per_node = 8
+num_infer_gpus = 1
+num_train_gpus = 3
+
+[generator.orchestrator]
+batch_size = 64
+rollouts_per_example = 8
+
+[generator.orchestrator.eval]
+interval = 250
+num_examples = 800
+group_size = 1
+
+[generator.orchestrator.eval.sampling]
+temperature = 1.0
+top_p = 1.0
+top_k = 20
+min_p = 0.0
+max_completion_tokens = 8192
+extra_body = { chat_template_kwargs = { enable_thinking = true } }
+
+[generator.orchestrator.client]
+base_url = [
+    "http://localhost:8000/v1",
+]
+
+[generator.orchestrator.train.sampling]
+temperature = 1.0
+top_p = 1.0
+top_k = 20
+min_p = 0.0
+max_completion_tokens = 8192
+
+[generator.orchestrator.train.sampling.extra_body.chat_template_kwargs]
+enable_thinking = true
+
+[[generator.orchestrator.train.env]]
+id = "prime_rl.adversarial.envs"
+name = "adversarial_countdown_code_generator"
+
+[generator.orchestrator.train.env.args]
+kind = "generator"
+task = "countdown_code"
+dataset_name = "/home/abou/data/datasets/countdown_code/gpt-5.5-2026-04-23_train15k_eval800/hf_dataset"
+split = "train"
+num_examples = 15000
+num_eval_examples = 800
+seed = 2
+
+[generator.trainer.loss]
+type = "default"
+kl_tau = 0.005
+
+[generator.trainer.optim]
+lr = 3e-07
+
+[generator.trainer.model]
+impl = "hf"
+attn = "flash_attention_3"
+fused_lm_head_token_chunk_size = "auto"
+
+[generator.inference]
+gpu_memory_utilization = 0.85
+
+[generator.inference.server]
+port = 8000
+
+[generator.inference.model]
+max_model_len = 16384
+
+[judge]
+max_steps = 10000
+seq_len = 2048
+
+[judge.model]
+name = "Qwen/Qwen3-14B"
+
+[judge.wandb]
+project = "countdown-code-adversarial"
+entity = "edison-scientific"
+name = "adversarial-countdown-code-judge-qwen3-1p7bgen-14bjudge-b64r8-nccl-jctx2k-max8192-seq16k-train15k-eval800-eval250-step0eval-stablehparams-10k-d14d-v1"
+
+[judge.weight_broadcast]
+type = "nccl"
+port = 29512
+timeout = 3600
+
+[judge.deployment]
+type = "single_node"
+gpus_per_node = 8
+num_infer_gpus = 1
+num_train_gpus = 3
+
+[judge.orchestrator]
+batch_size = 128
+rollouts_per_example = 1
+
+[judge.orchestrator.client]
+base_url = [
+    "http://localhost:8001/v1",
+]
+
+[judge.orchestrator.train]
+env = [
+    { id = "prime_rl.adversarial.envs", name = "adversarial_judge", args = { kind = "judge" } },
+]
+
+[judge.orchestrator.train.sampling]
+temperature = 0.0
+top_p = 1.0
+max_completion_tokens = 1
+
+[judge.orchestrator.train.sampling.extra_body.chat_template_kwargs]
+enable_thinking = false
+
+[judge.orchestrator.train.sampling.extra_body.structured_outputs]
+choice = [
+    "A",
+    "B",
+]
+
+[judge.trainer.optim]
+lr = 5e-07
+
+[judge.trainer.loss]
+type = "binary_classifier"
+positive_token = "A"
+negative_token = "B"
+
+[judge.trainer.model]
+impl = "hf"
+attn = "flash_attention_3"
+fused_lm_head_token_chunk_size = "disabled"
+
+[judge.inference.server]
+port = 8001
+
+[judge.inference.model]
+max_model_len = 2048
+
+[judge_update_gate]
+enabled = true
+accuracy_threshold = 0.8
+ema_decay = 0.95
+warmup_steps = 0
+max_skip_streak = 20
