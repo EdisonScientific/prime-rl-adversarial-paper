@@ -13,7 +13,7 @@ No optimization or reduction dtype settings were changed.
 
 ### `multiplication/`
 
-Four-digit multiplication experiments with a `Qwen/Qwen3-0.6B` generator. The directory includes exact-only, exact gated by judge, and judge-only runs with judge sizes from 0.6B to 8B.
+Four-digit multiplication experiments with a `Qwen/Qwen3-0.6B` generator. The directory includes exact-only, exact gated by judge, and judge-only runs with 0.6B, 1.7B, and 4B judges.
 
 ### `countdown_code/`
 
@@ -21,7 +21,7 @@ Code-based arithmetic-expression synthesis experiments. The directory includes e
 
 ### `smiles_to_formula/`
 
-SMILES-to-formula prediction experiments using the inverted Ether0/MolRQA setup. The directory includes exact-only, exact gated by judge, and judge-only runs with 14B and 32B judges.
+SMILES-to-formula prediction experiments using the inverted Ether0/MolRQA setup. The directory includes exact-only, exact gated by judge, and judge-only runs with 8B, 14B, and 32B judges.
 
 ### `nih_grant_abstract/`
 

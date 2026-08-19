@@ -1,4 +1,4 @@
-output_dir = "/home/abou/data/rl/adversarial-ether0-smiles2formula-nohint-qwen3-8bgen-14bjudge-b64r8-nccl-simpleprompt-max4096-lr5e7-jlr1e6-gate75-train18738-eval250-long15k-d14d-20260721"
+output_dir = "/home/abou/data/rl/adversarial-ether0-smiles2formula-nohint-qwen3-8bgen-14bjudge-b64r8-nccl-strictthink-minprompt-notopk-max4096-lr5e7-jlr1e6-gate75-train17938-eval800-long15k-d14d-20260721"
 clean_output_dir = false
 generator_reward_mode = "judge"
 judge_objective = "single_candidate"
@@ -39,7 +39,7 @@ name = "Qwen/Qwen3-8B"
 [generator.wandb]
 project = "ether0-adversarial"
 entity = "edison-scientific"
-name = "adversarial-ether0-smiles2formula-nohint-qwen3-8bgen-14bjudge-b64r8-nccl-simpleprompt-max4096-lr5e7-jlr1e6-gate75-train18738-eval250-long15k-d14d-20260721"
+name = "adversarial-ether0-smiles2formula-nohint-qwen3-8bgen-14bjudge-b64r8-nccl-strictthink-minprompt-notopk-max4096-lr5e7-jlr1e6-gate75-train17938-eval800-long15k-d14d-20260721"
 
 [generator.weight_broadcast]
 type = "nccl"
@@ -58,7 +58,7 @@ rollouts_per_example = 8
 
 [generator.orchestrator.eval]
 interval = 250
-num_examples = 250
+num_examples = 800
 group_size = 1
 
 [generator.orchestrator.client]
@@ -67,7 +67,7 @@ base_url = ["http://localhost:8000/v1"]
 [generator.orchestrator.train.sampling]
 temperature = 1.0
 top_p = 1.0
-top_k = 20
+top_k = -1
 min_p = 0.0
 max_completion_tokens = 4096
 extra_body = { chat_template_kwargs = { enable_thinking = true } }
@@ -75,7 +75,7 @@ extra_body = { chat_template_kwargs = { enable_thinking = true } }
 [generator.orchestrator.eval.sampling]
 temperature = 1.0
 top_p = 1.0
-top_k = 20
+top_k = -1
 min_p = 0.0
 max_completion_tokens = 4096
 extra_body = { chat_template_kwargs = { enable_thinking = true } }
@@ -83,7 +83,7 @@ extra_body = { chat_template_kwargs = { enable_thinking = true } }
 [[generator.orchestrator.train.env]]
 id = "prime_rl.adversarial.envs"
 name = "adversarial_ether0_generator"
-args = { kind = "generator", task = "ether0_smiles_to_formula", dataset_name = "futurehouse/molrqa2", split = "train", problem_type = "simple-formula", num_examples = 18738, eval_split = "test", num_eval_examples = 250, seed = 1, formula_l1_hint = false }
+args = { kind = "generator", task = "ether0_smiles_to_formula", dataset_name = "futurehouse/molrqa2", split = "train", problem_type = "simple-formula", num_examples = 17938, eval_split = "train", num_eval_examples = 800, holdout_eval_from_train = true, seed = 1, formula_l1_hint = false }
 
 [generator.trainer.loss]
 type = "default"
@@ -114,7 +114,7 @@ name = "Qwen/Qwen3-14B"
 [judge.wandb]
 project = "ether0-adversarial"
 entity = "edison-scientific"
-name = "adversarial-ether0-smiles2formula-nohint-qwen3-8bgen-14bjudge-b64r8-nccl-simpleprompt-max4096-lr5e7-jlr1e6-gate75-train18738-eval250-long15k-d14d-20260721"
+name = "adversarial-ether0-smiles2formula-nohint-qwen3-8bgen-14bjudge-b64r8-nccl-strictthink-minprompt-notopk-max4096-lr5e7-jlr1e6-gate75-train17938-eval800-long15k-d14d-20260721"
 
 [judge.weight_broadcast]
 type = "nccl"
