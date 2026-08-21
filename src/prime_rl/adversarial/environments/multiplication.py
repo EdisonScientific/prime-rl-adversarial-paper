@@ -7,8 +7,9 @@ from typing import Any
 import verifiers as vf
 from datasets import Dataset
 
-from prime_rl.adversarial.env_utils import extract_strict_think_answer_text
+from prime_rl.adversarial.environments.base import GeneratorEnv
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
+from prime_rl.adversarial.utils import extract_strict_think_answer_text
 
 INTEGER_RE = re.compile(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)")
 
@@ -46,22 +47,14 @@ def build_multiplication_dataset(n_digits: int, num_examples: int, seed: int) ->
     return Dataset.from_list(rows)
 
 
-class MultiplicationGeneratorEnv(vf.SingleTurnEnv):
+class MultiplicationGeneratorEnv(GeneratorEnv):
     """Four-digit multiplication env used by the adversarial experiments."""
 
     def __init__(self, n_digits: int = 3, num_examples: int = 10_000, seed: int = 0, **_: Any):
         super().__init__(
             dataset=build_multiplication_dataset(n_digits=n_digits, num_examples=num_examples, seed=seed),
             system_prompt=MULTIPLICATION_GENERATOR_SYSTEM_PROMPT,
-            rubric=vf.Rubric(funcs=[self.placeholder_reward]),
         )
-
-    async def placeholder_reward(self, completions, **kwargs) -> list[float]:
-        return [0.0 for _ in completions]
-
-    def adversarial_question(self, example: dict[str, Any]) -> str:
-        info = example.get("info") or {}
-        return str(info.get("question") or example["prompt"][-1]["content"])
 
     def adversarial_target(self, example: dict[str, Any]) -> int:
         info = example.get("info") or {}

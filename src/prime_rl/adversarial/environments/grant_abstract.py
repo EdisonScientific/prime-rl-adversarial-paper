@@ -9,8 +9,9 @@ from typing import Any
 import verifiers as vf
 from datasets import Dataset
 
-from prime_rl.adversarial.env_utils import extract_strict_answer_only_text
+from prime_rl.adversarial.environments.base import GeneratorEnv
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
+from prime_rl.adversarial.utils import collapse_whitespace, extract_strict_answer_only_text
 
 TITLE_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?")
 ABSTRACT_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
@@ -30,10 +31,6 @@ Do not include titles, authors, journal names, dates, citations, markdown, gener
 placeholders, or multiple abstracts.
 Stop immediately after the closing answer tag.
 """
-
-def collapse_whitespace(text: str) -> str:
-    return " ".join(str(text).strip().split())
-
 
 def nested_value(row: dict[str, Any], field: str) -> Any:
     value: Any = row
@@ -235,7 +232,7 @@ def abstract_distribution_metrics(candidate: str | None, reference: str) -> dict
     }
 
 
-class PaperAbstractGeneratorEnv(vf.SingleTurnEnv):
+class PaperAbstractGeneratorEnv(GeneratorEnv):
     """Paper-abstract generator env; the adversarial orchestrator assigns rewards."""
 
     def __init__(
@@ -271,15 +268,7 @@ class PaperAbstractGeneratorEnv(vf.SingleTurnEnv):
         super().__init__(
             dataset=build_paper_abstract_dataset(**self._dataset_args),
             system_prompt=PAPER_ABSTRACT_GENERATOR_SYSTEM_PROMPT,
-            rubric=vf.Rubric(funcs=[self.placeholder_reward]),
         )
-
-    async def placeholder_reward(self, completions, **kwargs) -> list[float]:
-        return [0.0 for _ in completions]
-
-    def adversarial_question(self, example: dict[str, Any]) -> str:
-        info = example.get("info") or {}
-        return str(info.get("question") or example["prompt"][-1]["content"])
 
     def adversarial_reference_answer(self, example: dict[str, Any]) -> str:
         info = example.get("info") or {}

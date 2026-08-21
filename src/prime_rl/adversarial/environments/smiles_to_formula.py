@@ -14,8 +14,9 @@ import pyarrow.ipc as pa_ipc
 import verifiers as vf
 from datasets import Dataset, load_dataset
 
-from prime_rl.adversarial.env_utils import extract_strict_think_answer_text
+from prime_rl.adversarial.environments.base import GeneratorEnv
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
+from prime_rl.adversarial.utils import collapse_whitespace, extract_strict_think_answer_text
 
 FORMULA_RE = re.compile(r"([A-Z][a-z]?)(\d*)")
 
@@ -38,10 +39,6 @@ The formula L1 distance is the sum over every element of
 abs(candidate_count - target_count). The best possible distance is 0.
 If the distance is not 0, revise the formula. Do not show the count table.
 """
-
-
-def collapse_whitespace(text: str) -> str:
-    return " ".join(str(text).strip().split())
 
 
 def text_field(row: dict[str, Any], *names: str) -> str:
@@ -211,7 +208,7 @@ def ether0_formula_answer_metrics(candidate_formula: str | None, solution: Any) 
     }
 
 
-class Ether0SmilesToFormulaGeneratorEnv(vf.SingleTurnEnv):
+class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
     """Ether0 diagnostic env: compute molecular formulas from reference SMILES."""
 
     def __init__(
@@ -256,7 +253,6 @@ class Ether0SmilesToFormulaGeneratorEnv(vf.SingleTurnEnv):
             dataset=dataset,
             eval_dataset=eval_dataset,
             system_prompt=self._build_system_prompt(),
-            rubric=vf.Rubric(funcs=[self.placeholder_reward]),
         )
 
     def _build_datasets(self) -> tuple[Dataset, Dataset | None]:
@@ -289,13 +285,6 @@ class Ether0SmilesToFormulaGeneratorEnv(vf.SingleTurnEnv):
         return ETHER0_SMILES_TO_FORMULA_SYSTEM_PROMPT + (
             ETHER0_SMILES_TO_FORMULA_HINT if self._formula_l1_hint else ""
         )
-
-    async def placeholder_reward(self, completions, **kwargs) -> list[float]:
-        return [0.0 for _ in completions]
-
-    def adversarial_question(self, example: dict[str, Any]) -> str:
-        info = example.get("info") or {}
-        return str(info.get("question") or example["prompt"][-1]["content"])
 
     def adversarial_reference_answer(self, example: dict[str, Any]) -> str:
         info = example.get("info") or {}

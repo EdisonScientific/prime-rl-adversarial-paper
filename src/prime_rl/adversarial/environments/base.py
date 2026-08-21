@@ -1,0 +1,47 @@
+from __future__ import annotations
+
+from typing import Any
+
+import verifiers as vf
+
+
+class GeneratorEnv(vf.SingleTurnEnv):
+    """Base for adversarial generator envs.
+
+    The adversarial orchestrator assigns rewards after rollout (from the judge
+    and/or ``verifiable_reward``), so the rubric is a zero-valued placeholder.
+    It drives envs through this protocol:
+
+    - ``adversarial_question(example)``: task text shown to the judge.
+    - ``adversarial_reference_answer(example)``: ground-truth answer text.
+    - ``adversarial_candidate_answer(completion)``: parsed model answer, or
+      ``None`` when the completion doesn't follow the answer format.
+    - ``adversarial_generator_result(completion, example)``: dict with
+      ``candidate``, ``format_ok``, ``verifiable_reward``, and per-rollout
+      ``metrics``.
+    - ``adversarial_judge_prompt(question, candidate)``: the A/B classification
+      prompt for the judge.
+    """
+
+    def __init__(self, **kwargs: Any):
+        kwargs.setdefault("rubric", vf.Rubric(funcs=[self.placeholder_reward]))
+        super().__init__(**kwargs)
+
+    async def placeholder_reward(self, completions, **kwargs) -> list[float]:
+        return [0.0 for _ in completions]
+
+    def adversarial_question(self, example: dict[str, Any]) -> str:
+        info = example.get("info") or {}
+        return str(info.get("question") or example["prompt"][-1]["content"])
+
+    def adversarial_reference_answer(self, example: dict[str, Any]) -> str:
+        raise NotImplementedError
+
+    def adversarial_candidate_answer(self, completion: Any) -> Any:
+        raise NotImplementedError
+
+    def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def adversarial_judge_prompt(self, question: str, candidate: Any) -> str:
+        raise NotImplementedError

@@ -14,8 +14,9 @@ from typing import Any
 import verifiers as vf
 from datasets import Dataset, load_dataset, load_from_disk
 
-from prime_rl.adversarial.env_utils import completion_has_reasoning, strip_think, to_text
+from prime_rl.adversarial.environments.base import GeneratorEnv
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
+from prime_rl.adversarial.utils import completion_has_reasoning, strip_think, to_text
 
 COUNTDOWN_JSON_RE = re.compile(r"</think>\s*({.*})\s*\Z", re.DOTALL | re.IGNORECASE)
 
@@ -408,7 +409,7 @@ def build_countdown_code_datasets(
     return Dataset.from_list(train_rows), Dataset.from_list(eval_rows) if eval_rows else None
 
 
-class CountdownCodeGeneratorEnv(vf.SingleTurnEnv):
+class CountdownCodeGeneratorEnv(GeneratorEnv):
     """Countdown-Code generator env, with proxy reward and gold-solution diagnostics."""
 
     def __init__(
@@ -431,11 +432,7 @@ class CountdownCodeGeneratorEnv(vf.SingleTurnEnv):
             dataset=dataset,
             eval_dataset=eval_dataset,
             system_prompt=COUNTDOWN_CODE_SYSTEM_PROMPT,
-            rubric=vf.Rubric(funcs=[self.placeholder_reward]),
         )
-
-    async def placeholder_reward(self, completions, **kwargs) -> list[float]:
-        return [0.0 for _ in completions]
 
     def adversarial_question(self, example: dict[str, Any]) -> str:
         info = example.get("info") or {}

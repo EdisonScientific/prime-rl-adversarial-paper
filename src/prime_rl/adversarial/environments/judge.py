@@ -6,7 +6,7 @@ from typing import Any
 import verifiers as vf
 from datasets import Dataset
 
-from prime_rl.adversarial.env_utils import extract_choice
+from prime_rl.adversarial.utils import extract_choice
 
 JUDGE_SYSTEM_PROMPT = """\
 You are an answer discriminator. Given a task and one candidate answer,

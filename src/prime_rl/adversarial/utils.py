@@ -1,5 +1,10 @@
 import re
+from pathlib import Path
 from typing import Any
+
+import orjson
+import verifiers as vf
+from verifiers.utils.save_utils import make_serializable
 
 CHOICE_FALLBACK_RE = re.compile(r"\b([AB])\b", re.IGNORECASE)
 ANSWER_RE = re.compile(r"<answer>(.*?)</answer>", re.DOTALL | re.IGNORECASE)
@@ -68,3 +73,23 @@ def extract_choice(completion: Any) -> str | None:
         return choice
     matches = CHOICE_FALLBACK_RE.findall(choice)
     return matches[-1].upper() if matches else None
+
+
+def collapse_whitespace(text: str) -> str:
+    return " ".join(str(text).strip().split())
+
+
+def get_model_completion_len(output: vf.RolloutOutput) -> int:
+    """Sum of model-generated completion tokens across all turns (excludes
+    environment-injected tokens between turns)."""
+    return sum(len(step["tokens"]["completion_ids"]) for step in output["trajectory"] if step.get("tokens"))
+
+
+def save_rollouts(rollouts: list[vf.RolloutOutput], path: Path, exclude_keys: set[str] | None = None) -> None:
+    """Save rollouts to a JSONL file using verifiers serialization."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    opts = orjson.OPT_APPEND_NEWLINE | orjson.OPT_SERIALIZE_NUMPY
+    with open(path, "wb") as f:
+        for rollout in rollouts:
+            row = {k: v for k, v in rollout.items() if k not in exclude_keys} if exclude_keys else rollout
+            f.write(orjson.dumps(row, default=make_serializable, option=opts))

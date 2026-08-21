@@ -11,20 +11,16 @@ import verifiers as vf
 
 import prime_rl._compat  # noqa: F401
 import prime_rl.monitors as monitors
-from prime_rl.adversarial.orchestrator_utils import (
-    get_model_completion_len,
-    save_rollouts,
-    setup_student_inference_pool,
-)
 from prime_rl.adversarial.rollout_utils import backfill_rollout_tokens, interleave_rollout
 from prime_rl.adversarial.runtime_env import TrainEnv
+from prime_rl.adversarial.utils import get_model_completion_len, save_rollouts
 from prime_rl.configs.adversarial import AdversarialRLConfig, AdversarialRoleConfig
 from prime_rl.orchestrator.packing import BatchPacker
 from prime_rl.trainer.model import setup_tokenizer
 from prime_rl.transport import TrainingSample, setup_micro_batch_sender
 from prime_rl.utils.client import InferencePool, init_nccl_broadcast
 from prime_rl.utils.config import cli
-from prime_rl.utils.logger import setup_logger
+from prime_rl.utils.logger import get_logger, setup_logger
 from prime_rl.utils.pathing import get_broadcast_dir, get_log_dir, get_rollout_dir, get_step_path, wait_for_path
 from prime_rl.utils.process import set_proc_title
 from prime_rl.utils.utils import clean_exit
@@ -322,6 +318,24 @@ def require_config(config: AdversarialRLConfig) -> None:
             raise ValueError("generator and judge trainer resume_step must match top-level adversarial resume_step.")
         if config.resume_step >= get_max_steps(config.generator):
             raise ValueError("adversarial resume_step must be lower than max_steps.")
+
+
+async def setup_student_inference_pool(*, config, tokenizer):
+    """Build the student inference pool + matching renderer."""
+    from renderers.base import create_renderer
+
+    client_config = config.student.client
+    model_name = config.student.model.name
+    renderer = create_renderer(tokenizer, config.renderer)
+    get_logger().info(f"Initialized {type(renderer).__name__} for {model_name}")
+    inference_pool = InferencePool(
+        client_config,
+        model_name=model_name,
+        train_client_type="renderer",
+        eval_client_type="openai_chat_completions",
+        renderer_config=config.renderer,
+    )
+    return renderer, inference_pool
 
 
 async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
