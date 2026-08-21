@@ -8,7 +8,6 @@ import verifiers as vf
 
 import prime_rl._compat  # noqa: F401
 import prime_rl.monitors as monitors
-from prime_rl.adversarial.runtime_env import TrainEnv
 from prime_rl.adversarial.utils import (
     backfill_rollout_tokens,
     get_model_completion_len,
@@ -23,16 +22,21 @@ from prime_rl.transports.rollouts.types import TrainingSample
 from prime_rl.utils.client import InferencePool, init_nccl_broadcast
 from prime_rl.utils.config import cli
 from prime_rl.utils.logger import get_logger, setup_logger
-from prime_rl.utils.pathing import get_broadcast_dir, get_log_dir, get_rollout_dir, get_step_path, wait_for_path
+from prime_rl.utils.pathing import get_broadcast_dir, get_rollout_dir, get_step_path, wait_for_path
 from prime_rl.utils.process import set_proc_title
 from prime_rl.utils.utils import clean_exit
+
+STATE_COLUMNS = ["trajectory"]
 
 
 @dataclass
 class RoleRuntime:
     name: str
     config: AdversarialRoleConfig
-    env: TrainEnv
+    env: vf.Environment
+    env_name: str
+    sampling_args: dict[str, Any]
+    max_retries: int
     tokenizer: Any
     renderer: Any
     inference_pool: InferencePool
@@ -40,6 +44,9 @@ class RoleRuntime:
     train_client: vf.ClientConfig
     ckpt_step: int = 0
     train_step: int = 0
+
+    def sampling_args_with_salt(self, cache_salt: str) -> dict[str, Any]:
+        return {**self.sampling_args, "extra_body": {**self.sampling_args.get("extra_body", {}), "cache_salt": cache_salt}}
 
 
 @dataclass
@@ -122,12 +129,8 @@ async def setup_student_inference_pool(*, config, tokenizer):
 async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
     logger = setup_logger(config.log.level or "info", json_logging=config.log.json_logging)
     orch = config.orchestrator
-    env = TrainEnv(orch.train.env[0])
-    await env.start(
-        log_dir=get_log_dir(config.output_dir) / "envs" / "train",
-        log_level=orch.log.vf_level,
-        json_logging=orch.log.json_logging,
-    )
+    env_config = orch.train.env[0]
+    env = vf.load_environment(env_config.stripped_id, **env_config.args)
     tokenizer = setup_tokenizer(orch.tokenizer)
     renderer, inference_pool = await setup_student_inference_pool(config=orch, tokenizer=tokenizer)
     rollout_model_name = orch.student.model.name
@@ -148,6 +151,9 @@ async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
         name=name,
         config=config,
         env=env,
+        env_name=env_config.resolved_name,
+        sampling_args=env_config.sampling.to_sampling_args(),
+        max_retries=env_config.max_retries,
         tokenizer=tokenizer,
         renderer=renderer,
         inference_pool=inference_pool,
@@ -162,29 +168,16 @@ async def run_generator_group(
     group_size: int,
     cache_salt: str,
 ) -> list[vf.RolloutOutput]:
-    if runtime.env.requires_group_scoring:
-        outputs = await runtime.env.run_group(
-            client=runtime.train_client,
-            example=example,
-            model_name=runtime.model_name,
-            group_size=group_size,
-            cache_salt=cache_salt,
-        )
-    else:
-        example_id = example["example_id"]
-        tasks = []
-        for rollout_idx in range(group_size):
-            tasks.append(
-                runtime.env.run_rollout(
-                    client=runtime.train_client,
-                    example=example,
-                    model_name=runtime.model_name,
-                    cache_salt=f"{cache_salt}-{example_id}-{rollout_idx}",
-                )
-            )
-        outputs = await asyncio.gather(*tasks)
+    outputs = await runtime.env.run_group(
+        [vf.RolloutInput(**example) for _ in range(group_size)],
+        client=runtime.train_client,
+        model=runtime.model_name,
+        sampling_args=runtime.sampling_args_with_salt(cache_salt),
+        max_retries=runtime.max_retries,
+        state_columns=STATE_COLUMNS,
+    )
     for output in outputs:
-        output["env_name"] = runtime.env.name
+        output["env_name"] = runtime.env_name
     return outputs
 
 
@@ -204,7 +197,7 @@ async def run_generator_eval(
     eval_rollouts = []
     for example, rollouts in zip(examples, generator_groups):
         for rollout in rollouts:
-            result = generator.env.env.adversarial_generator_result(rollout.get("completion"), example)
+            result = generator.env.adversarial_generator_result(rollout.get("completion"), example)
             rollout["reward"] = float(result["verifiable_reward"])
             rollout.setdefault("metrics", {}).update(result["metrics"])
             rollout.setdefault("info", {})
@@ -229,17 +222,19 @@ async def run_judge_rollout(
     if info:
         rollout_info.update(info)
     output = await runtime.env.run_rollout(
+        vf.RolloutInput(
+            example_id=example_id,
+            prompt=[{"role": "user", "content": prompt}],
+            answer=answer,
+            info=rollout_info,
+        ),
         client=runtime.train_client,
-        example={
-            "example_id": example_id,
-            "prompt": [{"role": "user", "content": prompt}],
-            "answer": answer,
-            "info": rollout_info,
-        },
-        model_name=runtime.model_name,
-        cache_salt=cache_salt,
+        model=runtime.model_name,
+        sampling_args=runtime.sampling_args_with_salt(cache_salt),
+        max_retries=runtime.max_retries,
+        state_columns=STATE_COLUMNS,
     )
-    output["env_name"] = runtime.env.name
+    output["env_name"] = runtime.env_name
     output.setdefault("metrics", {})["binary_classifier_label"] = label
     output["metrics"]["judge_reference_label"] = label
     output["metrics"]["judge_generated_sample"] = float(kind == "generated")
@@ -316,7 +311,7 @@ async def score_and_build_judge_batch(
 
     judge_rollouts = await asyncio.gather(*judge_tasks) if judge_tasks else []
     generated_judge_rollouts = judge_rollouts[0::2]
-    judge_env = judge.env.env
+    judge_env = judge.env
 
     for (rollout, result), judge_rollout in zip(generated_task_positions, generated_judge_rollouts):
         judge_reference_probability_proxy = judge_env.adversarial_reference_probability_proxy(judge_rollout)
@@ -348,7 +343,7 @@ async def rollouts_to_samples(runtime: RoleRuntime, rollouts: list[vf.RolloutOut
             *(asyncio.to_thread(backfill_rollout_tokens, rollout, runtime.renderer) for rollout in rollouts)
         )
     train_examples: list[TrainingSample] = []
-    temperature = float(runtime.env.sampling_args.get("temperature", 1.0) or 1.0)
+    temperature = float(runtime.sampling_args.get("temperature", 1.0) or 1.0)
     for rollout in rollouts:
         sample = rollout_to_sample(rollout)
         if sample is None:
@@ -461,7 +456,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
         eval_config = config.generator.orchestrator.eval
         eval_examples: list[dict[str, Any]] = []
         if eval_config is not None:
-            eval_examples = generator.env.env.get_eval_dataset(n=eval_config.num_examples).to_list()
+            eval_examples = generator.env.get_eval_dataset(n=eval_config.num_examples).to_list()
             if not eval_examples:
                 raise ValueError("Generator eval dataset is empty")
             logger.info(
@@ -604,10 +599,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
     finally:
         await monitors.finalize()
         if generator is not None:
-            generator.env.shutdown()
             await generator.inference_pool.stop()
         if judge is not None:
-            judge.env.shutdown()
             await judge.inference_pool.stop()
 
     logger.success("Adversarial orchestrator finished")

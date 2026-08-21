@@ -1,4 +1,3 @@
-import math
 import warnings
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias
@@ -85,23 +84,8 @@ class EnvConfig(BaseConfig):
     args: dict = {}
     """Keyword arguments forwarded to ``vf.load_environment``. See the environment's docstring for accepted args."""
 
-    extra_env_kwargs: dict[str, Any] = {}
-    """Extra kwargs passed to the env (e.g. ``seq_len``, ``max_total_completion_tokens``). Auto-populated by the orchestrator; user overrides are generally discouraged. The main use case is matching ``extra_env_kwargs`` when running an env in an isolated environment server."""
-
-    address: str | None = None
-    """ZMQ address of an external env server (e.g. ``tcp://host:5000``). When set, the orchestrator connects to this server instead of spawning one; when None, a subprocess env server is spawned automatically."""
-
-    num_workers: int | Literal["auto"] = "auto"
-    """Worker processes for the spawned env server. ``auto`` scales to 1 worker per 256 concurrent rollouts. Ignored when ``address`` is set."""
-
     max_retries: int = Field(3, ge=0)
     """Times the env server retries a failed rollout before returning an error."""
-
-    max_total_completion_tokens: int = -1
-    """Maximum total completion tokens across all turns in a multi-turn rollout. ``-1`` disables. Auto-populated into ``extra_env_kwargs``."""
-
-    timeout: float | None = Field(None, validation_alias=AliasChoices("timeout", "timeout_seconds"))
-    """Per-rollout wall-clock timeout in seconds. None disables."""
 
     @property
     def stripped_id(self) -> str:
@@ -120,18 +104,6 @@ class EnvConfig(BaseConfig):
             )
         return self
 
-    @model_validator(mode="after")
-    def resolve_max_total_completion_tokens(self):
-        self.extra_env_kwargs["max_total_completion_tokens"] = self.max_total_completion_tokens
-        return self
-
-    @model_validator(mode="after")
-    def resolve_timeout(self):
-        if self.timeout is not None:
-            self.extra_env_kwargs["timeout_seconds"] = self.timeout
-        return self
-
-
 class TrainEnvConfig(EnvConfig):
     sampling: TrainSamplingConfig = TrainSamplingConfig()
     """Per-env sampling overrides. Unset fields inherit from the group-level train sampling config."""
@@ -148,15 +120,12 @@ class TrainConfig(BaseConfig):
     sampling: TrainSamplingConfig = TrainSamplingConfig()
     """Shared training sampling configuration."""
 
-    num_workers: int | Literal["auto"] = "auto"
-    """Default worker processes for env servers. Can be overridden per env."""
-
     max_retries: int = Field(3, ge=0)
     """Default retries for failed rollouts. Can be overridden per env."""
 
     @model_validator(mode="after")
     def resolve_env_defaults(self):
-        """Resolve per-env overrides: inherit group-level sampling, num_workers, and max_retries."""
+        """Resolve per-env overrides: inherit group-level sampling and max_retries."""
         group_sampling = self.sampling.model_dump()
         for env in self.env:
             if "sampling" not in env.model_fields_set:
@@ -164,8 +133,6 @@ class TrainConfig(BaseConfig):
             else:
                 merged = group_sampling | env.sampling.model_dump(exclude_unset=True)
                 env.sampling = TrainSamplingConfig(**merged)
-            if "num_workers" not in env.model_fields_set:
-                env.num_workers = self.num_workers
             if "max_retries" not in env.model_fields_set:
                 env.max_retries = self.max_retries
         return self
@@ -284,12 +251,6 @@ class OrchestratorConfig(BaseConfig):
 
     pad_to_multiple_of: int = Field(1, ge=1)
     """Pad packed microbatches to a multiple of this token count."""
-
-    oversampling_factor: float | None = Field(None, gt=0)
-    """Rollout-mode batching only. Multiplier used to derive ``max_inflight_rollouts`` from ``batch_size`` when ``max_inflight_rollouts`` is unset. Values below 1.0 intentionally cap in-flight rollout capacity below ``batch_size``."""
-
-    max_inflight_rollouts: int | None = Field(None, ge=1)
-    """Maximum number of rollouts kept in-flight. Required for token-based batching. With ``batch_size`` set, defaults to ``batch_size * oversampling_factor`` (or ``batch_size`` when ``oversampling_factor`` is unset)."""
 
     group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
     """Output sequences returned per example during training."""
@@ -456,38 +417,18 @@ class OrchestratorConfig(BaseConfig):
             self.batch_size = 128
         if self.batch_size % self.group_size != 0:
             raise ValueError("Batch size must be divisible by the number of samples per problem")
-        oversampling_factor = self.oversampling_factor if self.oversampling_factor is not None else 1.0
-        resolved_max_inflight_rollouts = max(
-            self.group_size,
-            int(self.batch_size * oversampling_factor),
-        )
-        if self.max_inflight_rollouts is not None and self.oversampling_factor is not None:
-            if self.max_inflight_rollouts != resolved_max_inflight_rollouts:
-                raise ValueError("max_inflight_rollouts conflicts with oversampling_factor * batch_size")
-        if self.max_inflight_rollouts is None:
-            self.max_inflight_rollouts = resolved_max_inflight_rollouts
-
-        if self.max_inflight_rollouts is not None and self.max_inflight_rollouts < self.group_size:
-            raise ValueError("max_inflight_rollouts must be at least the number of rollouts per example")
 
         # Propagate the top-level ``group_size`` into each train env that didn't set its own.
         for env_cfg in self.train.env:
             if "group_size" not in env_cfg.model_fields_set:
                 env_cfg.group_size = self.group_size
 
-        # Resolve train env num_workers from max_inflight_rollouts
-        for env_cfg in self.train.env:
-            if env_cfg.num_workers == "auto":
-                assert self.max_inflight_rollouts is not None
-                env_cfg.num_workers = max(1, math.ceil(self.max_inflight_rollouts / 256))
-
         return self
 
     @model_validator(mode="after")
     def resolve_env_config(self):
-        """Populate extra_env_kwargs and vLLM sampling defaults from top-level fields."""
+        """Populate vLLM sampling defaults on each train env."""
         for env in self.train.env:
-            env.extra_env_kwargs.update(max_seq_len=self.seq_len)
             env.sampling.extra_body.setdefault("top_k", -1)
             env.sampling.extra_body.setdefault("min_p", 0.0)
             env.sampling.extra_body.setdefault("return_token_ids", True)

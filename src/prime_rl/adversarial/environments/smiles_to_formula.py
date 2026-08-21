@@ -65,11 +65,14 @@ def parse_formula_counts(formula: str | None) -> Counter[str] | None:
     return formula_atom_counts(text)
 
 
-def formula_l1_distance(left: Counter[str], right: Counter[str], *, include_hydrogen: bool = True) -> float:
-    elements = set(left) | set(right)
-    if not include_hydrogen:
-        elements.discard("H")
-    return float(sum(abs(left[element] - right[element]) for element in elements))
+def formula_l1_to_target(candidate_formula: str | None, solution: Any) -> float | None:
+    """L1 atom-count distance between candidate and target; None when the candidate is not a valid formula."""
+    candidate_counts = parse_formula_counts(candidate_formula)
+    if candidate_counts is None:
+        return None
+    target_counts = formula_atom_counts(ether0_target_formula(solution))
+    elements = set(candidate_counts) | set(target_counts)
+    return float(sum(abs(candidate_counts[element] - target_counts[element]) for element in elements))
 
 
 def build_ether0_smiles_to_formula_dataset(
@@ -136,40 +139,6 @@ def ether0_target_formula(solution: Any) -> str:
         return str(formula)
 
     raise ValueError(f"Ether0 adversarial env only supports formula rewards for now, got {info.fxn_name!r}.")
-
-
-def ether0_formula_answer_metrics(candidate_formula: str | None, solution: Any) -> dict[str, float | None]:
-    target_formula = ether0_target_formula(solution)
-    target_counts = formula_atom_counts(target_formula)
-    target_atom_count = float(sum(target_counts.values()))
-    target_heavy_atom_count = float(sum(count for element, count in target_counts.items() if element != "H"))
-    predicted_counts = parse_formula_counts(candidate_formula)
-    if predicted_counts is None:
-        return {
-            "valid_formula": 0.0,
-            "formula_l1_distance": None,
-            "formula_heavy_l1_distance": None,
-            "formula_l1_normalized": None,
-            "formula_heavy_l1_normalized": None,
-            "formula_target_atom_count": target_atom_count,
-            "formula_target_heavy_atom_count": target_heavy_atom_count,
-        }
-
-    formula_l1 = formula_l1_distance(predicted_counts, target_counts)
-    formula_heavy_l1 = formula_l1_distance(
-        predicted_counts,
-        target_counts,
-        include_hydrogen=False,
-    )
-    return {
-        "valid_formula": 1.0,
-        "formula_l1_distance": formula_l1,
-        "formula_heavy_l1_distance": formula_heavy_l1,
-        "formula_l1_normalized": formula_l1 / max(target_atom_count, 1.0),
-        "formula_heavy_l1_normalized": formula_heavy_l1 / max(target_heavy_atom_count, 1.0),
-        "formula_target_atom_count": target_atom_count,
-        "formula_target_heavy_atom_count": target_heavy_atom_count,
-    }
 
 
 class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
@@ -258,9 +227,8 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         info = example.get("info") or {}
         candidate = self.adversarial_candidate_answer(completion)
-        metrics = ether0_formula_answer_metrics(candidate, info["solution"])
-        format_ok = candidate is not None and metrics["valid_formula"] == 1.0
-        return self.generator_result(candidate, format_ok, float(format_ok and metrics["formula_l1_distance"] == 0.0))
+        formula_l1 = formula_l1_to_target(candidate, info["solution"])
+        return self.generator_result(candidate, formula_l1 is not None, float(formula_l1 == 0.0))
 
 
 def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
