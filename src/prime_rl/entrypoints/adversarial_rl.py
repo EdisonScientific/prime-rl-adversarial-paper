@@ -165,15 +165,14 @@ def write_configs(config: AdversarialRLConfig, config_dir: Path) -> None:
                 json.dump(dump_resolved_config(role_config.inference, exclude=INFERENCE_CONFIG_EXCLUDE), f, indent=2)
 
 
-def _shell_join(cmd: list[str]) -> str:
-    return " ".join("$SLURM_PROCID" if arg == "{SLURM_PROCID}" else shlex.quote(arg) for arg in cmd)
-
-
 def start_process(cmd: list[str], log_path: Path, env: dict[str, str], node: str | list[str] | None = None) -> Popen:
     process_env = {**os.environ, **env}
     if node is not None:
         nodes = [node] if isinstance(node, str) else node
         remote_env = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
+        # A literal {SLURM_PROCID} arg becomes $SLURM_PROCID, expanded per task on the
+        # remote side (multi-node torchrun --node-rank); everything else is quoted.
+        remote_cmd = " ".join("$SLURM_PROCID" if arg == "{SLURM_PROCID}" else shlex.quote(arg) for arg in cmd)
         cmd = [
             "srun",
             "--overlap",
@@ -184,7 +183,7 @@ def start_process(cmd: list[str], log_path: Path, env: dict[str, str], node: str
             "--export=ALL",
             "bash",
             "-lc",
-            f"{remote_env} exec {_shell_join(cmd)}",
+            f"{remote_env} exec {remote_cmd}",
         ]
     with open(log_path, "w") as log_file:
         return Popen(cmd, env=process_env, stdout=log_file, stderr=log_file)
