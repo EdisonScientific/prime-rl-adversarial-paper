@@ -553,9 +553,11 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 judge_accuracy,
             )
 
-            send_tasks = [send_role_batch(generator, generator_rollouts, group_size, generator.train_step)]
+            # The trainer consumes the batch for its upcoming step: fresh trainer progress
+            # starts at 1 and step N trains on rollouts/step_N, then broadcasts v_N.
+            send_tasks = [send_role_batch(generator, generator_rollouts, group_size, generator.train_step + 1)]
             if not skip_judge_update:
-                send_tasks.append(send_role_batch(judge, scored.judge_rollouts, 1, judge.train_step))
+                send_tasks.append(send_role_batch(judge, scored.judge_rollouts, 1, judge.train_step + 1))
             await asyncio.gather(*send_tasks)
             step_path = get_step_path(get_rollout_dir(config.output_dir), step)
             await asyncio.gather(
