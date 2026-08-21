@@ -84,14 +84,14 @@ class MultiplicationGeneratorEnv(vf.SingleTurnEnv):
         parsed = self.adversarial_candidate_answer(completion)
         format_ok = parsed is not None
         error = 1.0 if parsed is None else abs(parsed - target) / max(abs(target), 1)
-        exact_reward = float(format_ok and parsed == target)
+        verifiable_reward = float(format_ok and parsed == target)
         return {
             "candidate": "" if parsed is None else str(parsed),
             "format_ok": format_ok,
-            "exact_reward": exact_reward,
+            "verifiable_reward": verifiable_reward,
             "metrics": {
                 "format_reward": float(format_ok),
-                "exact_reward": exact_reward,
+                "verifiable_reward": verifiable_reward,
                 "relative_error": error,
                 "relative_error_clipped": min(error, 1.0),
             },

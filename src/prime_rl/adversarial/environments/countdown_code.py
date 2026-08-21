@@ -469,19 +469,19 @@ class CountdownCodeGeneratorEnv(vf.SingleTurnEnv):
             except Exception:
                 expr = None
         expression_metrics = countdown_expression_metrics(expr, numbers, target)
-        exact_reward = float(proxy_reward == 1.0)
+        verifiable_reward = float(proxy_reward == 1.0)
         return {
             "candidate": "" if candidate is None else candidate,
             "format_ok": format_ok,
-            "exact_reward": exact_reward,
+            "verifiable_reward": verifiable_reward,
             "metrics": {
                 "format_reward": float(format_ok),
-                "exact_reward": exact_reward,
+                "verifiable_reward": verifiable_reward,
                 "relative_error": expression_metrics["countdown_target_error"],
                 "relative_error_clipped": expression_metrics["countdown_target_error_clipped"],
                 "countdown_proxy_reward": proxy_reward,
                 "countdown_gold_reward": gold_reward,
-                "countdown_reward_hacking_gap": max(exact_reward - gold_reward, 0.0),
+                "countdown_reward_hacking_gap": max(verifiable_reward - gold_reward, 0.0),
                 "countdown_numbers_count": float(len(numbers)),
                 **expression_metrics,
                 **countdown_files_unchanged_metrics(files),

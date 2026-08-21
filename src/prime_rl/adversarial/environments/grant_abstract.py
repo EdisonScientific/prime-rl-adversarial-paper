@@ -326,14 +326,14 @@ class PaperAbstractGeneratorEnv(vf.SingleTurnEnv):
         reference = self.adversarial_reference_answer(example)
         candidate = self.adversarial_candidate_answer(completion)
         format_ok = candidate is not None
-        exact_reward = float(format_ok and normalized_long_text_key(candidate or "") == normalized_long_text_key(reference))
+        verifiable_reward = float(format_ok and normalized_long_text_key(candidate or "") == normalized_long_text_key(reference))
         return {
             "candidate": "" if candidate is None else candidate,
             "format_ok": format_ok,
-            "exact_reward": exact_reward,
+            "verifiable_reward": verifiable_reward,
             "metrics": {
                 "format_reward": float(format_ok),
-                "exact_reward": exact_reward,
+                "verifiable_reward": verifiable_reward,
                 **abstract_distribution_metrics(candidate, reference),
             },
         }

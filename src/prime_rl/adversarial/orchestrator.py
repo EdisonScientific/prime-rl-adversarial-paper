@@ -166,7 +166,7 @@ def add_judge_alignment_diagnostics(log_values: dict[str, float], generator_roll
     diagnostic_targets = (
         "relative_error",
         "relative_error_clipped",
-        "exact_reward",
+        "verifiable_reward",
         "format_reward",
         "valid_formula",
         "formula_l1_distance",
@@ -203,11 +203,11 @@ def add_judge_alignment_diagnostics(log_values: dict[str, float], generator_roll
 
     exact_probability = mean_judge_probability_where(
         generator_rollouts,
-        lambda rollout: finite_rollout_metric(rollout, "exact_reward") == 1.0,
+        lambda rollout: finite_rollout_metric(rollout, "verifiable_reward") == 1.0,
     )
     inexact_probability = mean_judge_probability_where(
         generator_rollouts,
-        lambda rollout: finite_rollout_metric(rollout, "exact_reward") == 0.0,
+        lambda rollout: finite_rollout_metric(rollout, "verifiable_reward") == 0.0,
     )
     format_ok_probability = mean_judge_probability_where(
         generator_rollouts,
@@ -263,8 +263,8 @@ def add_judge_alignment_diagnostics(log_values: dict[str, float], generator_roll
 
 def generator_result_reward(result: dict[str, Any], reward_mode: str) -> float:
     if reward_mode == "exact_only":
-        return float(result["exact_reward"])
-    return float(result["exact_reward"])
+        return float(result["verifiable_reward"])
+    return float(result["verifiable_reward"])
 
 
 def write_orchestrator_control(run: AdversarialRoleConfig) -> None:
@@ -531,10 +531,10 @@ async def score_and_build_judge_batch(
         if not result["format_ok"]:
             reward = 0.0
         elif reward_mode == "exact_only":
-            reward = result["exact_reward"]
+            reward = result["verifiable_reward"]
         elif reward_mode == "judge_times_exact":
             judge_reward = judge_reward_from_probability(judge_reference_probability_proxy)
-            reward = judge_reward * result["exact_reward"]
+            reward = judge_reward * result["verifiable_reward"]
         else:
             reward = judge_reward_from_probability(judge_reference_probability_proxy)
         assign_generator_reward(
@@ -725,7 +725,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             }
             for metric_name in (
                 "format_reward",
-                "exact_reward",
+                "verifiable_reward",
                 "relative_error",
                 "relative_error_clipped",
                 "countdown_proxy_reward",
@@ -771,7 +771,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 key: mean_rollout_metric(generator_rollouts, key)
                 for key in (
                     "format_reward",
-                    "exact_reward",
+                    "verifiable_reward",
                     "relative_error",
                     "relative_error_clipped",
                     "valid_formula",
@@ -862,7 +862,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                     pstdev(scored.generator_rewards) if scored.generator_rewards else 0.0
                 ),
                 "adversarial/generator/format_accuracy": generator_metrics["format_reward"] or 0.0,
-                "adversarial/generator/exact_reward": generator_metrics["exact_reward"] or 0.0,
+                "adversarial/generator/verifiable_reward": generator_metrics["verifiable_reward"] or 0.0,
                 "adversarial/generator/relative_error": generator_metrics["relative_error"] or 0.0,
                 "adversarial/generator/relative_error_clipped": generator_metrics["relative_error_clipped"] or 0.0,
                 "adversarial/generator/judge_reference_probability_proxy": (
@@ -950,7 +950,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                     [float(rollout["reward"]) for rollout in eval_rollouts]
                 )
                 log_values["adversarial/eval/generator/rollouts"] = len(eval_rollouts)
-                for metric_name in ("format_reward", "exact_reward", "relative_error", "relative_error_clipped"):
+                for metric_name in ("format_reward", "verifiable_reward", "relative_error", "relative_error_clipped"):
                     value = mean_rollout_metric(eval_rollouts, metric_name)
                     if value is not None:
                         log_values[f"adversarial/eval/generator/{metric_name}"] = value
@@ -963,7 +963,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             logger.success(
                 f"Step {step} | Time: {time.perf_counter() - step_start:.2f}s | "
                 f"Gen reward: {log_values['adversarial/generator/reward']:.4f} | "
-                f"Gen exact: {log_values['adversarial/generator/exact_reward']:.4f} | "
+                f"Gen verifiable: {log_values['adversarial/generator/verifiable_reward']:.4f} | "
                 f"Judge acc: {log_values['adversarial/judge/accuracy']:.4f} | "
                 f"Judge skip: {int(skip_judge_update)}"
             )

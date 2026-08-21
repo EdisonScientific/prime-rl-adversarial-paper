@@ -256,7 +256,7 @@ class Ether0SmilesToFormulaGeneratorEnv(vf.SingleTurnEnv):
             funcs = [self.placeholder_reward]
             weights = None
         elif reward_mode == "exact":
-            funcs = [self.exact_reward, self.format_reward]
+            funcs = [self.verifiable_reward, self.format_reward]
             weights = [1.0, 0.0]
         else:
             raise ValueError("Ether0 smiles-to-formula reward_mode must be 'placeholder' or 'exact'.")
@@ -302,7 +302,7 @@ class Ether0SmilesToFormulaGeneratorEnv(vf.SingleTurnEnv):
     async def placeholder_reward(self, completions, **kwargs) -> list[float]:
         return [0.0 for _ in completions]
 
-    async def exact_reward(self, completion, info, **kwargs) -> float:
+    async def verifiable_reward(self, completion, info, **kwargs) -> float:
         candidate = self.adversarial_candidate_answer(completion)
         if candidate is None:
             return 0.0
@@ -332,16 +332,16 @@ class Ether0SmilesToFormulaGeneratorEnv(vf.SingleTurnEnv):
         candidate = self.adversarial_candidate_answer(completion)
         metrics = ether0_formula_answer_metrics(candidate, info["solution"])
         format_ok = candidate is not None and metrics["valid_formula"] == 1.0
-        exact_reward = float(format_ok and metrics["formula_l1_distance"] == 0.0)
+        verifiable_reward = float(format_ok and metrics["formula_l1_distance"] == 0.0)
         return {
             "candidate": "" if candidate is None else candidate,
             "format_ok": format_ok,
-            "exact_reward": exact_reward,
+            "verifiable_reward": verifiable_reward,
             "metrics": {
                 "format_reward": float(candidate is not None),
-                "exact_reward": exact_reward,
-                "relative_error": 1.0 - exact_reward,
-                "relative_error_clipped": 1.0 - exact_reward,
+                "verifiable_reward": verifiable_reward,
+                "relative_error": 1.0 - verifiable_reward,
+                "relative_error_clipped": 1.0 - verifiable_reward,
                 **metrics,
             },
         }

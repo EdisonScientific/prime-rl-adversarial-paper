@@ -67,7 +67,7 @@ class AdversarialCurriculumConfig(BaseConfig):
     """Archived curriculum shape; enabled curriculum is not supported by the minimal port."""
 
     enabled: bool = False
-    metric: str = "exact_reward"
+    metric: str = "verifiable_reward"
     threshold: float = 0.3
     window: int = Field(50, ge=1)
     min_steps_per_stage: int = Field(100, ge=0)

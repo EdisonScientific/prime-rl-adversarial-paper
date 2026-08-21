@@ -5,7 +5,7 @@ judge_objective = "single_candidate"
 
 [curriculum]
 enabled = false
-metric = "exact_reward"
+metric = "verifiable_reward"
 threshold = 0.3
 window = 50
 min_steps_per_stage = 0
