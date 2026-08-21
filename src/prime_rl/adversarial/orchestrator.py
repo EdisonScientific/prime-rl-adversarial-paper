@@ -126,6 +126,22 @@ async def setup_student_inference_pool(*, config, tokenizer):
     return renderer, inference_pool
 
 
+def legacy_train_client(orch) -> vf.ClientConfig:
+    """Rollout client for the legacy verifiers envs. The upstream InferencePool
+    builds verifiers.v1 client configs, which legacy ``run_rollout`` rejects."""
+    client = orch.student.client
+    return vf.ClientConfig(
+        client_type="renderer",
+        api_base_url=client.base_url,
+        api_key_var=client.api_key_var,
+        max_connections=8192,
+        max_keepalive_connections=8192,
+        extra_headers_from_state=client.extra_headers_from_state,
+        renderer_config=orch.renderer,
+        renderer_model_name=orch.student.model.name,
+    )
+
+
 async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
     logger = setup_logger(config.log.level or "info", json_logging=config.log.json_logging)
     orch = config.orchestrator
@@ -158,7 +174,7 @@ async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
         renderer=renderer,
         inference_pool=inference_pool,
         model_name=rollout_model_name,
-        train_client=inference_pool.train_client,
+        train_client=legacy_train_client(orch),
     )
 
 
