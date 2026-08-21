@@ -525,7 +525,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             )
             generator_rollouts = [rollout for group in generator_groups for rollout in group]
             scored = await score_and_build_judge_batch(
-                generator.env.env,
+                generator.env,
                 judge,
                 step=step,
                 generator_groups=generator_groups,
