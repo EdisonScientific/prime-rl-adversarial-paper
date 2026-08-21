@@ -11,7 +11,7 @@ import verifiers as vf
 
 import prime_rl._compat  # noqa: F401
 import prime_rl.monitors as monitors
-from prime_rl.adversarial.rollout_utils import backfill_rollout_tokens, interleave_rollout
+from prime_rl.adversarial.rollout_utils import backfill_rollout_tokens, rollout_to_sample
 from prime_rl.adversarial.runtime_env import TrainEnv
 from prime_rl.adversarial.utils import get_model_completion_len, save_rollouts
 from prime_rl.configs.adversarial import AdversarialRLConfig, AdversarialRoleConfig
@@ -571,34 +571,33 @@ async def rollouts_to_samples(runtime: RoleRuntime, rollouts: list[vf.RolloutOut
     train_examples: list[TrainingSample] = []
     temperature = float(runtime.env.sampling_args.get("temperature", 1.0) or 1.0)
     for rollout in rollouts:
-        samples = interleave_rollout(rollout)
-        if samples is None:
+        sample = rollout_to_sample(rollout)
+        if sample is None:
             continue
         classifier_label = (rollout.get("metrics") or {}).get("binary_classifier_label")
-        for sample in samples:
-            if classifier_label is not None:
-                target = "A" if float(classifier_label) >= 0.5 else "B"
-                target_ids = runtime.tokenizer.encode(target, add_special_tokens=False)
-                if not target_ids:
-                    continue
-                first_train_idx = next((idx for idx, is_train in enumerate(sample.mask) if is_train), len(sample.token_ids))
-                prefix_ids = sample.token_ids[:first_train_idx]
-                token_ids = prefix_ids + target_ids
-                sample = TrainingSample(
-                    token_ids=token_ids,
-                    mask=[False] * len(prefix_ids) + [True] * len(target_ids),
-                    logprobs=[0.0] * len(token_ids),
-                    temperatures=[temperature] * len(token_ids),
-                    env_name=sample.env_name,
-                    rl_weights=[0.0] * len(token_ids),
-                    ce_weights=[0.0] * len(prefix_ids) + [1.0] * len(target_ids),
-                    advantages=[0.0] * len(token_ids),
-                )
-            else:
-                advantage = float(rollout["advantage"])
-                sample.temperatures = [temperature] * len(sample.token_ids)
-                sample.advantages = [advantage if is_train else 0.0 for is_train in sample.mask]
-            train_examples.append(sample)
+        if classifier_label is not None:
+            target = "A" if float(classifier_label) >= 0.5 else "B"
+            target_ids = runtime.tokenizer.encode(target, add_special_tokens=False)
+            if not target_ids:
+                continue
+            first_train_idx = next((idx for idx, is_train in enumerate(sample.mask) if is_train), len(sample.token_ids))
+            prefix_ids = sample.token_ids[:first_train_idx]
+            token_ids = prefix_ids + target_ids
+            sample = TrainingSample(
+                token_ids=token_ids,
+                mask=[False] * len(prefix_ids) + [True] * len(target_ids),
+                logprobs=[0.0] * len(token_ids),
+                temperatures=[temperature] * len(token_ids),
+                env_name=sample.env_name,
+                rl_weights=[0.0] * len(token_ids),
+                ce_weights=[0.0] * len(prefix_ids) + [1.0] * len(target_ids),
+                advantages=[0.0] * len(token_ids),
+            )
+        else:
+            advantage = float(rollout["advantage"])
+            sample.temperatures = [temperature] * len(sample.token_ids)
+            sample.advantages = [advantage if is_train else 0.0 for is_train in sample.mask]
+        train_examples.append(sample)
     return train_examples
 
 
