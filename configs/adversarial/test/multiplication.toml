@@ -8,6 +8,10 @@ seq_len = 4096
 [generator.model]
 name = "Qwen/Qwen3-0.6B"
 
+[generator.wandb]
+project = "testing-adversarial"
+name = "adversarial-test-multiplication"
+
 [generator.deployment]
 type = "single_node"
 gpus_per_node = 4
