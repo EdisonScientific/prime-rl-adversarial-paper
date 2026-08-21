@@ -1,10 +1,8 @@
 import asyncio
 import time
 from dataclasses import dataclass
-from itertools import cycle
 from typing import Any, Iterable
 
-import tomli_w
 import verifiers as vf
 
 import prime_rl._compat  # noqa: F401
@@ -38,12 +36,9 @@ class RoleRuntime:
     renderer: Any
     inference_pool: InferencePool
     model_name: str
-    client_cycle: Iterable[vf.ClientConfig]
+    train_client: vf.ClientConfig
     ckpt_step: int = 0
     train_step: int = 0
-
-    async def next_client(self) -> vf.ClientConfig:
-        return next(self.client_cycle)
 
 
 @dataclass
@@ -61,32 +56,6 @@ class JudgeUpdateGateState:
 def mean(values: Iterable[float]) -> float:
     values = list(values)
     return sum(values) / len(values) if values else 0.0
-
-
-def mean_rollout_metric(rollouts: list[vf.RolloutOutput], key: str) -> float | None:
-    values = []
-    for rollout in rollouts:
-        value = rollout.get("metrics", {}).get(key)
-        if value is not None:
-            values.append(float(value))
-    return mean(values) if values else None
-
-
-def judge_reward_from_probability(probability: float | None) -> float:
-    if probability is None:
-        return 0.0
-    return probability
-
-
-def generator_result_reward(result: dict[str, Any]) -> float:
-    return float(result["verifiable_reward"])
-
-
-def write_orchestrator_control(run: AdversarialRoleConfig) -> None:
-    control_dir = run.orchestrator.output_dir / "control"
-    control_dir.mkdir(parents=True, exist_ok=True)
-    with open(control_dir / "orch.toml", "wb") as f:
-        tomli_w.dump(run.orchestrator.model_dump(exclude_none=True, mode="json"), f)
 
 
 def get_max_steps(run: AdversarialRoleConfig) -> int:
@@ -187,7 +156,7 @@ async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
         renderer=renderer,
         inference_pool=inference_pool,
         model_name=rollout_model_name,
-        client_cycle=cycle([inference_pool.train_client]),
+        train_client=inference_pool.train_client,
     )
 
 
@@ -199,19 +168,19 @@ async def run_generator_group(
 ) -> list[vf.RolloutOutput]:
     if runtime.env.requires_group_scoring:
         outputs = await runtime.env.run_group(
-            client=await runtime.next_client(),
+            client=runtime.train_client,
             example=example,
             model_name=runtime.model_name,
             group_size=group_size,
             cache_salt=cache_salt,
         )
     else:
-        example_id = example.get("example_id", "unknown")
+        example_id = example["example_id"]
         tasks = []
         for rollout_idx in range(group_size):
             tasks.append(
                 runtime.env.run_rollout(
-                    client=await runtime.next_client(),
+                    client=runtime.train_client,
                     example=example,
                     model_name=runtime.model_name,
                     cache_salt=f"{cache_salt}-{example_id}-{rollout_idx}",
@@ -240,7 +209,7 @@ async def run_generator_eval(
     for example, rollouts in zip(examples, generator_groups):
         for rollout in rollouts:
             result = generator.env.env.adversarial_generator_result(rollout.get("completion"), example)
-            rollout["reward"] = generator_result_reward(result)
+            rollout["reward"] = float(result["verifiable_reward"])
             rollout.setdefault("metrics", {}).update(result["metrics"])
             rollout.setdefault("info", {})
             rollout["info"]["kind"] = "eval_generated"
@@ -264,7 +233,7 @@ async def run_judge_rollout(
     if info:
         rollout_info.update(info)
     output = await runtime.env.run_rollout(
-        client=await runtime.next_client(),
+        client=runtime.train_client,
         example={
             "example_id": example_id,
             "prompt": [{"role": "user", "content": prompt}],
@@ -360,10 +329,9 @@ async def score_and_build_judge_batch(
         elif reward_mode == "exact_only":
             reward = result["verifiable_reward"]
         elif reward_mode == "judge_times_exact":
-            judge_reward = judge_reward_from_probability(judge_reference_probability_proxy)
-            reward = judge_reward * result["verifiable_reward"]
+            reward = (judge_reference_probability_proxy or 0.0) * result["verifiable_reward"]
         else:
-            reward = judge_reward_from_probability(judge_reference_probability_proxy)
+            reward = judge_reference_probability_proxy or 0.0
         assign_generator_reward(
             rollout,
             result,
@@ -393,8 +361,6 @@ async def rollouts_to_samples(runtime: RoleRuntime, rollouts: list[vf.RolloutOut
         if classifier_label is not None:
             target = "A" if float(classifier_label) >= 0.5 else "B"
             target_ids = runtime.tokenizer.encode(target, add_special_tokens=False)
-            if not target_ids:
-                continue
             first_train_idx = next((idx for idx, is_train in enumerate(sample.mask) if is_train), len(sample.token_ids))
             prefix_ids = sample.token_ids[:first_train_idx]
             token_ids = prefix_ids + target_ids
@@ -474,8 +440,6 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
     require_config(config)
     logger = setup_logger(config.log.level or "info", json_logging=config.log.json_logging)
     logger.info("Starting synchronous adversarial prototype")
-    write_orchestrator_control(config.generator)
-    write_orchestrator_control(config.judge)
     await monitors.setup(
         wandb=config.generator.orchestrator.wandb,
         prime=config.generator.orchestrator.prime_monitor,
@@ -512,7 +476,6 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
         judge_gate_state = JudgeUpdateGateState()
         group_size = config.generator.orchestrator.group_size
         batch_size = config.generator.orchestrator.batch_size
-        assert batch_size is not None
         groups_per_step = batch_size // group_size
         logger.info(
             f"Loop ready: max_steps={config.generator.max_steps}, batch_size={batch_size}, group_size={group_size}"
@@ -534,8 +497,9 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             )
             eval_log_values = {
                 "adversarial/eval/generator/reward": mean([float(rollout["reward"]) for rollout in eval_rollouts]),
-                "adversarial/eval/generator/verifiable_reward": mean_rollout_metric(eval_rollouts, "verifiable_reward")
-                or 0.0,
+                "adversarial/eval/generator/verifiable_reward": mean(
+                    float(r["metrics"]["verifiable_reward"]) for r in eval_rollouts
+                ),
             }
             await monitors.log(eval_log_values, step=0)
             logger.success(
@@ -562,7 +526,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 reward_mode=config.generator_reward_mode,
             )
 
-            generator_verifiable_reward = mean_rollout_metric(generator_rollouts, "verifiable_reward") or 0.0
+            generator_verifiable_reward = mean(float(r["metrics"]["verifiable_reward"]) for r in generator_rollouts)
             judge_rewards = [float(r["reward"]) for r in scored.judge_rollouts]
             generated_judge_rollouts = [
                 r for r in scored.judge_rollouts if r.get("info", {}).get("kind") == "generated"
@@ -630,8 +594,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 log_values["adversarial/eval/generator/reward"] = mean(
                     [float(rollout["reward"]) for rollout in eval_rollouts]
                 )
-                log_values["adversarial/eval/generator/verifiable_reward"] = (
-                    mean_rollout_metric(eval_rollouts, "verifiable_reward") or 0.0
+                log_values["adversarial/eval/generator/verifiable_reward"] = mean(
+                    float(r["metrics"]["verifiable_reward"]) for r in eval_rollouts
                 )
             await monitors.log(log_values, step=step)
             logger.success(
