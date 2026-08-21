@@ -3,14 +3,6 @@ clean_output_dir = false
 generator_reward_mode = "judge"
 judge_objective = "single_candidate"
 
-[curriculum]
-enabled = false
-metric = "reward"
-threshold = 0.5
-window = 50
-min_steps_per_stage = 0
-min_metric_values = {}
-
 [log]
 level = "debug"
 
@@ -46,7 +38,6 @@ num_train_nodes = 2
 num_infer_nodes = 1
 
 [generator.orchestrator]
-max_off_policy_steps = 0
 batch_size = 1024
 rollouts_per_example = 16
 
@@ -54,12 +45,6 @@ rollouts_per_example = 16
 interval = 100
 num_examples = 128
 group_size = 1
-
-[generator.orchestrator.eval.sampling]
-temperature = 1.0
-max_completion_tokens = 3500
-top_p = 1.0
-extra_body = { thinking_token_budget = 1536, chat_template_kwargs = { enable_thinking = true } }
 
 [generator.orchestrator.client]
 base_url = ["http://localhost:8550/v1"]
@@ -148,7 +133,6 @@ num_train_nodes = 4
 num_infer_nodes = 1
 
 [judge.orchestrator]
-max_off_policy_steps = 0
 batch_size = 2048
 rollouts_per_example = 1
 

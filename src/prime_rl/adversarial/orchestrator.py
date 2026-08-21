@@ -304,8 +304,6 @@ def require_config(config: AdversarialRLConfig) -> None:
         )
     if judge.group_size != 1:
         raise ValueError("judge group_size must be 1 for classifier training.")
-    if config.curriculum.enabled:
-        raise ValueError("adversarial curriculum is not part of this minimal experiment port.")
     resume_steps = [
         run.trainer.ckpt.resume_step
         for run in (config.generator, config.judge)

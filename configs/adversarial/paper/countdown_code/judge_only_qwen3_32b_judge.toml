@@ -41,14 +41,6 @@ interval = 250
 num_examples = 800
 group_size = 1
 
-[generator.orchestrator.eval.sampling]
-temperature = 1.0
-top_p = 1.0
-top_k = 20
-min_p = 0.0
-max_completion_tokens = 8192
-extra_body = { chat_template_kwargs = { enable_thinking = true } }
-
 [generator.orchestrator.client]
 base_url = [
     "http://localhost:8000/v1",

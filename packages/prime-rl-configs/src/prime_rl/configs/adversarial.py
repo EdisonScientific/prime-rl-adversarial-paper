@@ -6,7 +6,6 @@ from pydantic import Field, model_validator
 from prime_rl.configs.adversarial_orchestrator import (
     FileSystemWeightBroadcastConfig as AdversarialOrchestratorFileSystemWeightBroadcastConfig,
 )
-from prime_rl.configs.adversarial_orchestrator import CheckpointConfig as AdversarialOrchestratorCheckpointConfig
 from prime_rl.configs.adversarial_orchestrator import (
     NCCLWeightBroadcastConfig as AdversarialOrchestratorNCCLWeightBroadcastConfig,
 )
@@ -24,6 +23,7 @@ from prime_rl.configs.rl import (
     SingleNodeDeploymentConfig,
 )
 from prime_rl.configs.shared import EnvVars, ResumeConfig, RunConfig, SlurmConfig, TransportConfig
+from prime_rl.configs.trainer import CheckpointConfig as TrainerCheckpointConfig
 from prime_rl.configs.trainer import (
     FileSystemWeightBroadcastConfig as TrainerFileSystemWeightBroadcastConfig,
 )
@@ -34,7 +34,6 @@ from prime_rl.configs.trainer import (
     NIXLWeightBroadcastConfig as TrainerNIXLWeightBroadcastConfig,
 )
 from prime_rl.configs.trainer import TokenizerConfig, TrainerConfig
-from prime_rl.configs.trainer import CheckpointConfig as TrainerCheckpointConfig
 from prime_rl.utils.config import BaseConfig
 
 
@@ -46,41 +45,6 @@ class JudgeUpdateGateConfig(BaseConfig):
     ema_decay: float = Field(0.95, ge=0.0, lt=1.0)
     warmup_steps: int = Field(0, ge=0)
     max_skip_streak: int | None = Field(20, ge=1)
-
-
-class AdversarialCurriculumStageConfig(BaseConfig):
-    """Archived curriculum stage shape kept so older disabled TOML blocks parse."""
-
-    reference_formula_prefix_terms_from_end: int | None = None
-    no_reference_formula_prefix: bool = False
-
-    @model_validator(mode="after")
-    def validate_stage(self):
-        if self.no_reference_formula_prefix and self.reference_formula_prefix_terms_from_end is not None:
-            raise ValueError(
-                "Set either no_reference_formula_prefix or reference_formula_prefix_terms_from_end, not both."
-            )
-        return self
-
-
-class AdversarialCurriculumConfig(BaseConfig):
-    """Archived curriculum shape; enabled curriculum is not supported by the minimal port."""
-
-    enabled: bool = False
-    metric: str = "verifiable_reward"
-    threshold: float = 0.3
-    window: int = Field(50, ge=1)
-    min_steps_per_stage: int = Field(100, ge=0)
-    max_steps_per_stage: int | None = Field(None, ge=1)
-    min_metric_values: dict[str, float] = Field(default_factory=dict)
-    max_metric_values: dict[str, float] = Field(default_factory=dict)
-    stages: list[AdversarialCurriculumStageConfig] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def validate_curriculum(self):
-        if self.enabled and not self.stages:
-            raise ValueError("Enabled adversarial curriculum requires at least one stage.")
-        return self
 
 
 class AdversarialRoleConfig(BaseConfig):
@@ -174,7 +138,6 @@ class AdversarialRLConfig(BaseConfig):
     judge_objective: Literal["single_candidate"] = "single_candidate"
     resume_step: int | None = Field(None, ge=1)
     judge_update_gate: JudgeUpdateGateConfig = JudgeUpdateGateConfig()
-    curriculum: AdversarialCurriculumConfig = AdversarialCurriculumConfig()
     log: SharedLogConfig = SharedLogConfig()
 
     @model_validator(mode="after")
@@ -199,10 +162,7 @@ class AdversarialRLConfig(BaseConfig):
             for run in (self.generator, self.judge):
                 if run.trainer.ckpt is None:
                     run.trainer.ckpt = TrainerCheckpointConfig()
-                if run.orchestrator.ckpt is None:
-                    run.orchestrator.ckpt = AdversarialOrchestratorCheckpointConfig()
                 run.trainer.resume = ResumeConfig(step=self.resume_step)
-                run.orchestrator.ckpt.resume_step = self.resume_step
         return self
 
     def with_output_dir(self, run: AdversarialRoleConfig, output_dir: Path) -> AdversarialRoleConfig:

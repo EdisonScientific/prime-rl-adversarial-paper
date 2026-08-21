@@ -3,29 +3,6 @@ clean_output_dir = false
 generator_reward_mode = "judge_times_exact"
 judge_objective = "single_candidate"
 
-[curriculum]
-enabled = false
-metric = "verifiable_reward"
-threshold = 0.3
-window = 50
-min_steps_per_stage = 0
-min_metric_values = {}
-
-[[curriculum.stages]]
-reference_formula_prefix_terms_from_end = -1
-
-[[curriculum.stages]]
-reference_formula_prefix_terms_from_end = -2
-
-[[curriculum.stages]]
-reference_formula_prefix_terms_from_end = -3
-
-[[curriculum.stages]]
-reference_formula_prefix_terms_from_end = -4
-
-[[curriculum.stages]]
-no_reference_formula_prefix = true
-
 [log]
 level = "debug"
 
@@ -65,14 +42,6 @@ group_size = 1
 base_url = ["http://localhost:8000/v1"]
 
 [generator.orchestrator.train.sampling]
-temperature = 1.0
-top_p = 1.0
-top_k = -1
-min_p = 0.0
-max_completion_tokens = 4096
-extra_body = { chat_template_kwargs = { enable_thinking = true } }
-
-[generator.orchestrator.eval.sampling]
 temperature = 1.0
 top_p = 1.0
 top_k = -1

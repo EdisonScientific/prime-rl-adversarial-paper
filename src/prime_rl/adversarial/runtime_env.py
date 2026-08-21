@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-import atexit
 import multiprocessing as mp
-from collections.abc import Iterator, Sequence
 from multiprocessing.process import BaseProcess
 from pathlib import Path
-from typing import Generic, TypeVar
 
 import verifiers as vf
 from verifiers.serve import ZMQEnvClient, ZMQEnvServer
 from verifiers.utils.serve_utils import get_free_port
 
-from prime_rl.configs.adversarial_orchestrator import EnvConfig, EvalEnvConfig, TrainEnvConfig
+from prime_rl.configs.adversarial_orchestrator import EnvConfig, TrainEnvConfig
 from prime_rl.utils.logger import get_logger
 
 REQUIRED_STATE_COLUMNS = ["trajectory"]
@@ -167,91 +164,3 @@ class TrainEnv(Env):
 
     def get_dataset(self, seed: int | None = None):
         return self.env.get_dataset(seed=seed)
-
-
-class EvalEnv(Env):
-    config: EvalEnvConfig
-
-    def __init__(self, config: EvalEnvConfig):
-        super().__init__(config)
-        self.sampling_args = config.sampling.to_sampling_args()
-        self.examples = self.env.get_eval_dataset(n=config.num_examples).to_list()
-
-
-EnvT = TypeVar("EnvT", bound=Env)
-
-
-class Envs(Generic[EnvT]):
-    """Base container for a set of Env instances."""
-
-    _envs: dict[str, EnvT]
-
-    @property
-    def names(self) -> list[str]:
-        return list(self._envs.keys())
-
-    @property
-    def configs(self) -> list[EnvConfig]:
-        return [env.config for env in self._envs.values()]
-
-    def get(self, name: str) -> EnvT:
-        return self._envs[name]
-
-    def __iter__(self) -> Iterator[EnvT]:
-        return iter(self._envs.values())
-
-    def __len__(self) -> int:
-        return len(self._envs)
-
-    async def start(
-        self,
-        log_dir: Path,
-        log_level: str | None = None,
-        json_logging: bool = False,
-    ) -> None:
-        """Spawn env servers (where needed) and connect env clients one at a time.
-
-        Serialized to avoid a TOCTOU port race: get_free_port() only holds the port
-        until it returns, so parallel spawns can hand the same port to two children.
-        """
-        for env in self:
-            await env.start(log_dir=log_dir, log_level=log_level, json_logging=json_logging)
-        atexit.register(self.shutdown)
-
-    def shutdown(self) -> None:
-        """Terminate all spawned env server processes in parallel."""
-        processes = [env._env_server_process for env in self if env._env_server_process is not None]
-        if not processes:
-            return
-        logger = get_logger()
-        logger.debug(f"Shutting down {len(processes)} env server(s)")
-        for p in processes:
-            p.terminate()
-        for p in processes:
-            p.join(timeout=25)
-            if p.is_alive():
-                logger.warning(f"Env server {p.pid} did not exit after 25s, force killing")
-                p.kill()
-                p.join(timeout=5)
-        for env in self:
-            env._env_server_process = None
-
-
-class TrainEnvs(Envs[TrainEnv]):
-    """Collection of training environments."""
-
-    def __init__(self, configs: Sequence[TrainEnvConfig]):
-        self._envs: dict[str, TrainEnv] = {}
-        for config in configs:
-            env = TrainEnv(config)
-            self._envs[env.name] = env
-
-
-class EvalEnvs(Envs[EvalEnv]):
-    """Collection of evaluation environments."""
-
-    def __init__(self, configs: Sequence[EvalEnvConfig]):
-        self._envs: dict[str, EvalEnv] = {}
-        for config in configs:
-            env = EvalEnv(config)
-            self._envs[env.name] = env

@@ -11,33 +11,11 @@ from prime_rl.configs.shared import (
     BaseModelConfig,
     ClientConfig,
     FileSystemTransportConfig,
-    HeartbeatConfig,
     LogConfig,
     TransportConfig,
 )
 from prime_rl.configs.trainer import TokenizerConfig
 from prime_rl.utils.config import BaseConfig
-
-
-class OptimizerConfig(BaseConfig):
-    lr: float = Field(1e-4, ge=0)
-    """Learning rate for this run (per-run override for multi-run training)."""
-
-
-class LoRAConfig(BaseConfig):
-    name: str | None = None
-    """LoRA adapter name. If None, auto-generated from rank and alpha."""
-
-    rank: int | None = Field(None, ge=1)
-    """LoRA rank for this run. Must be ≤ trainer's max rank. If None, uses the trainer's rank."""
-
-    alpha: float | None = Field(None, ge=0)
-    """LoRA alpha for this run. If None, uses the trainer's alpha."""
-
-
-class ModelConfig(BaseModelConfig):
-    lora: LoRAConfig | None = None
-    """Per-run LoRA configuration. If None, LoRA is disabled."""
 
 
 class TrainSamplingConfig(BaseConfig):
@@ -97,65 +75,6 @@ class TrainSamplingConfig(BaseConfig):
         return data
 
 
-class EvalSamplingConfig(BaseConfig):
-    temperature: float | None = Field(None, ge=0)
-    """Sampling temperature. None defers to the inference server default."""
-
-    top_p: float | None = None
-    """Nucleus sampling threshold. None defers to the inference server default."""
-
-    top_k: int | None = None
-    """Top-k sampling. None defers to the inference server default."""
-
-    min_p: float | None = Field(None, ge=0)
-    """Min-p sampling threshold. None defers to the inference server default."""
-
-    max_completion_tokens: int | None = Field(
-        None, validation_alias=AliasChoices("max_completion_tokens", "max_tokens")
-    )
-    """Maximum output tokens per turn. None defers to the inference server default."""
-
-    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = None
-    """Reasoning effort constraint for reasoning models."""
-
-    extra_body: dict[str, Any] = {}
-    """Extra body parameters forwarded to the inference server."""
-
-    def to_sampling_args(self) -> dict[str, Any]:
-        """Convert to OAI-compatible sampling args dict. Only includes non-None fields."""
-        args: dict[str, Any] = {}
-        if self.temperature is not None:
-            args["temperature"] = self.temperature
-        if self.top_p is not None:
-            args["top_p"] = self.top_p
-        if self.max_completion_tokens is not None:
-            args["max_completion_tokens"] = self.max_completion_tokens
-        if self.reasoning_effort is not None:
-            args["reasoning_effort"] = self.reasoning_effort
-
-        extra_body = dict(self.extra_body)
-        if self.top_k is not None:
-            extra_body["top_k"] = self.top_k
-        if self.min_p is not None:
-            extra_body["min_p"] = self.min_p
-        if extra_body:
-            args["extra_body"] = extra_body
-
-        return args
-
-    @model_validator(mode="before")
-    @classmethod
-    def _deprecate_max_tokens(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "max_tokens" in data and "max_completion_tokens" not in data:
-            warnings.warn(
-                "'max_tokens' is deprecated, use 'max_completion_tokens' instead. "
-                "Auto-translating for now, but this will be removed in a future release.",
-                FutureWarning,
-                stacklevel=2,
-            )
-        return data
-
-
 class EnvConfig(BaseConfig):
     id: str = "reverse-text"
     """Registered verifiers environment ID (e.g. ``math-env``, ``primeintellect/math-env``). May include an ``@version`` suffix for installation."""
@@ -174,9 +93,6 @@ class EnvConfig(BaseConfig):
 
     num_workers: int | Literal["auto"] = "auto"
     """Worker processes for the spawned env server. ``auto`` scales to 1 worker per 256 concurrent rollouts. Ignored when ``address`` is set."""
-
-    ratio: float | None = Field(None, gt=0)
-    """Sampling weight for this environment in the buffer. When None for all envs, samples uniformly across all available problems. When set, must be set on all envs — values are relative weights normalized to probabilities (e.g. [1, 1] and [0.5, 0.5] are equivalent)."""
 
     max_retries: int = Field(3, ge=0)
     """Times the env server retries a failed rollout before returning an error."""
@@ -228,20 +144,6 @@ class TrainEnvConfig(EnvConfig):
     Inherits from ``orchestrator.group_size`` when unset."""
 
 
-class EvalEnvConfig(EnvConfig):
-    sampling: EvalSamplingConfig = EvalSamplingConfig()
-    """Per-env sampling overrides. Unset fields inherit from the group-level eval sampling config."""
-
-    num_examples: int = -1
-    """Eval examples to sample from the dataset. ``-1`` uses all available examples."""
-
-    group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
-    """Rollouts generated per example. Used for pass@k estimation (e.g. ``group_size=8`` enables pass@1 through pass@8)."""
-
-    interval: int = Field(100, ge=1)
-    """Per-env eval interval. If unset, inherits from the group-level eval interval."""
-
-
 class TrainConfig(BaseConfig):
     env: list[TrainEnvConfig] = [TrainEnvConfig()]
     """Training environments."""
@@ -281,154 +183,18 @@ class TrainConfig(BaseConfig):
             )
         return self
 
-    @model_validator(mode="after")
-    def validate_env_ratios(self):
-        ratios = [env.ratio for env in self.env]
-        if all(r is None for r in ratios):
-            return self
-        if any(r is None for r in ratios):
-            raise ValueError("Either all envs must have a ratio or none of them. Got a mix of set and unset ratios.")
-        return self
-
-
 class EvalConfig(BaseConfig):
-    env: list[EvalEnvConfig] = [EvalEnvConfig()]
-    """Evaluation environments."""
-
-    sampling: EvalSamplingConfig = Field(default_factory=EvalSamplingConfig)
-    """Shared eval sampling configuration; can differ from training sampling."""
+    """Periodic generator eval on the env's held-out eval dataset (rolled out
+    with the train sampling args)."""
 
     num_examples: int = -1
-    """Default eval examples per environment. ``-1`` uses all. Can be overridden per env."""
+    """Eval examples to sample from the dataset. ``-1`` uses all available examples."""
 
     group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
-    """Default rollouts per example. Can be overridden per env."""
-
-    num_workers: int | Literal["auto"] = "auto"
-    """Default worker processes for env servers. Can be overridden per env."""
-
-    max_retries: int = Field(3, ge=0)
-    """Default retries for failed rollouts. Can be overridden per env."""
+    """Rollouts generated per example."""
 
     interval: int = Field(100, ge=1)
     """Step interval at which to evaluate the model."""
-
-    skip_first_step: bool = False
-    """If True, skip the startup eval that otherwise runs before any
-    train rollouts."""
-
-    @model_validator(mode="after")
-    def resolve_env_defaults(self):
-        """Resolve per-env overrides: inherit group-level sampling, num_workers, max_retries, num_examples, group_size, and interval. Then resolve auto num_workers."""
-        group_sampling = self.sampling.model_dump()
-        for env in self.env:
-            if "sampling" not in env.model_fields_set:
-                env.sampling = EvalSamplingConfig(**group_sampling)
-            else:
-                merged = group_sampling | env.sampling.model_dump(exclude_unset=True)
-                env.sampling = EvalSamplingConfig(**merged)
-            if "num_examples" not in env.model_fields_set:
-                env.num_examples = self.num_examples
-            if "group_size" not in env.model_fields_set:
-                env.group_size = self.group_size
-            if "interval" not in env.model_fields_set:
-                env.interval = self.interval
-            if "num_workers" not in env.model_fields_set:
-                env.num_workers = self.num_workers
-            if "max_retries" not in env.model_fields_set:
-                env.max_retries = self.max_retries
-            # Resolve auto num_workers now that num_examples and group_size are set
-            if env.num_workers == "auto":
-                if env.num_examples == -1:
-                    env.num_workers = 4
-                else:
-                    max_concurrent = env.num_examples * env.group_size
-                    env.num_workers = max(1, math.ceil(max_concurrent / 256))
-        return self
-
-    @model_validator(mode="after")
-    def validate_non_empty_envs(self):
-        if not self.env:
-            raise ValueError(
-                "EvalConfig must define at least one env. Either drop the "
-                "[orchestrator.eval] block entirely (to disable eval) or "
-                "add a [[orchestrator.eval.env]] block."
-            )
-        return self
-
-    @model_validator(mode="after")
-    def validate_unique_env_names(self):
-        env_names = [env.resolved_name for env in self.env]
-        duplicates = [n for n in env_names if env_names.count(n) > 1]
-        if duplicates:
-            raise ValueError(
-                f"Duplicate evaluation environment names: {set(duplicates)}. Each env must have a unique name."
-            )
-        return self
-
-
-class CheckpointConfig(BaseConfig):
-    interval: int | None = Field(None, ge=1)
-    """Step interval at which to save the orchestrator checkpoint."""
-
-    resume_step: int | None = Field(None, ge=-1)
-    """Step to resume the orchestrator from. None starts from scratch; ``-1`` resumes from the latest checkpoint available."""
-
-    wait_for_weights_timeout: int | None = Field(None, ge=1)
-    """When resuming, wait up to this many seconds for the weight directory to appear. Useful when the orchestrator restarts while the trainer is still saving weights. If None, fail immediately when weights are not found."""
-
-    keep_last: int | None = Field(None, ge=1)
-    """Keep at most this many recent step checkpoints on disk. If None, never clean old checkpoints based on recency."""
-
-    keep_interval: int | None = Field(None, ge=1)
-    """Keep checkpoints at every N steps permanently (e.g. ``keep_interval=100`` keeps step 100, 200, ...). If None, no interval-based keeping."""
-
-    skip_progress: bool = False
-    """Skip loading the progress from checkpoint."""
-
-
-# Flags rare tokens generated at high entropy (Section 5.2, https://arxiv.org/abs/2510.02387).
-class GibberishFilterConfig(BaseConfig):
-    type: Literal["gibberish"] = "gibberish"
-
-    enforce: bool = False
-    """When True, skip detected rollouts entirely so they are not sent to the trainer. When False, only track detection metrics."""
-
-    token_id_threshold: int = 100_000
-    """Token IDs above this are candidates for gibberish. BPE tokens are sorted by merge order."""
-
-    logprob_offset: float = 2.0
-    """Offset from uniform-distribution logprob. Threshold = ``-log(vocab_size) - logprob_offset``."""
-
-
-# Flags rollouts stuck in a repetition loop: emits high-confidence tokens for an extended stretch.
-# Flagged when `window` consecutive tokens are each sampled with probability above `prob_threshold`.
-# (Section 3.2, https://arxiv.org/abs/2506.13585)
-class RepetitionFilterConfig(BaseConfig):
-    type: Literal["repetition"] = "repetition"
-
-    enforce: bool = False
-    """When True, skip detected rollouts entirely so they are not sent to the trainer. When False, only track detection metrics."""
-
-    window: int = Field(3_000, ge=1)
-    """Consecutive high-probability steps required to flag the rollout."""
-
-    prob_threshold: float = Field(0.99, gt=0, le=1)
-    """Tokens sampled with probability above this are considered repetitive. Consecutive such tokens count toward the window."""
-
-
-# Flags rollouts with zero advantage.
-class ZeroAdvantageFilterConfig(BaseConfig):
-    type: Literal["zero_advantage"] = "zero_advantage"
-
-    enforce: bool = True
-    """When True, skip detected rollouts entirely so they are not sent to the trainer. When False, only track detection metrics."""
-
-
-FilterConfig: TypeAlias = Annotated[
-    GibberishFilterConfig | RepetitionFilterConfig | ZeroAdvantageFilterConfig,
-    Field(discriminator="type"),
-]
 
 
 class FileSystemWeightBroadcastConfig(BaseConfig):
@@ -459,10 +225,6 @@ WeightBroadcastConfig: TypeAlias = Annotated[
 ]
 
 
-class OrchestratorExperimentalConfig(BaseConfig):
-    pass
-
-
 class LegacyClientConfig(ClientConfig):
     @model_validator(mode="before")
     @classmethod
@@ -476,7 +238,7 @@ class LegacyClientConfig(ClientConfig):
 
 
 class RolloutModelConfig(BaseConfig):
-    model: ModelConfig = ModelConfig()
+    model: BaseModelConfig = BaseModelConfig()
 
     client: LegacyClientConfig = LegacyClientConfig()
 
@@ -486,92 +248,9 @@ class BufferConfig(BaseConfig):
     """Dataset sampling seed used by the synchronous adversarial loop."""
 
 
-class PedagogyConfig(BaseConfig):
-    """Configures pedagogical RL with student model scoring."""
-
-    enabled: Annotated[
-        bool,
-        Field(description="Enable pedagogical RL reward modification."),
-    ] = False
-
-    alpha: Annotated[
-        float,
-        Field(ge=0, description="Scaling factor (lambda) for the spike penalty in G = exp(-alpha * spike)."),
-    ] = 1.0
-
-    spike_beta: Annotated[
-        float,
-        Field(
-            gt=0,
-            description=(
-                "Temperature for the LogSumExp spike penalty. "
-                "Higher values penalize worst-case spikes more (beta->inf = max gap). "
-                "Lower values approach the mean gap (beta->0)."
-            ),
-        ),
-    ] = 5.0
-
-    g_min: Annotated[
-        float,
-        Field(
-            ge=0,
-            le=1,
-            description="Floor for the learnability score G. G = max(g_min, exp(-alpha * spike)).",
-        ),
-    ] = 0.0
-
-    g_bonus: Annotated[
-        float,
-        Field(
-            ge=0,
-            description=(
-                "Additive G bonus in the pedagogy reward: reward = R_task * G + g_bonus * G. "
-                "Ensures the teacher always has incentive to reduce spike penalty, "
-                "even when R_task=0."
-            ),
-        ),
-    ] = 0.0
-
-    student: RolloutModelConfig = Field(
-        default_factory=RolloutModelConfig,
-        description="Frozen student model for spike scoring.",
-    )
-
-    @model_validator(mode="after")
-    def _validate_student_when_enabled(self) -> "PedagogyConfig":
-        if self.enabled and not self.student.client.base_url:
-            raise ValueError("pedagogy.enabled=True requires pedagogy.student.client.base_url to be set.")
-        return self
-
-
 class OrchestratorConfig(BaseConfig):
-    training_mode: Literal["rl", "opd", "sft"] = "rl"
-    """Training mode. ``rl``: student generates rollouts, no teacher. ``opd``: student generates rollouts, teacher computes logprobs (teacher_tau > 0). ``sft``: teacher generates rollouts, student inference pool used for evals and weight sync."""
-
     student: RolloutModelConfig = Field(RolloutModelConfig(), validation_alias=AliasChoices("student", "model"))
     """Student rollout participant (model + client) — the model being trained."""
-
-    teacher: RolloutModelConfig | None = Field(None, validation_alias=AliasChoices("teacher", "teacher_model"))
-    """Teacher rollout participant (model + client). Role depends on ``training_mode``: ``opd`` — teacher computes logprobs; ``sft`` — teacher generates rollouts."""
-
-    opd_reward_threshold: float | None = Field(
-        None,
-        description=(
-            "If set, the teacher addendum is dropped (the per-token teacher_kl "
-            "signal becomes zero) for rollouts whose reward falls on one side of "
-            "this threshold. Only applies when training_mode='opd'."
-        ),
-    )
-
-    opd_reward_gate_direction: Literal["below", "above"] = Field(
-        "below",
-        description=(
-            "Direction of the reward gate. 'below' drops the addendum for rollouts "
-            "BELOW the threshold (=> OPD only fires on rollouts >= threshold). "
-            "'above' drops the addendum for rollouts ABOVE the threshold (=> OPD "
-            "only fires on rollouts < threshold, the Apple-paper direction)."
-        ),
-    )
 
     train: TrainConfig = TrainConfig()
 
@@ -583,51 +262,14 @@ class OrchestratorConfig(BaseConfig):
     to ``"auto"``, which resolves from ``tokenizer.name_or_path`` via
     ``MODEL_RENDERER_MAP``."""
 
-    pool_size: int | None = Field(None, ge=1)
-    """Number of renderer slots shared across concurrent rollouts. Bump
-    for long multi-turn prompts where client-side jinja tokenization
-    serializes."""
-
-    optim: OptimizerConfig = OptimizerConfig()
-    """Per-run optimizer configuration for multi-run training."""
-
     eval: EvalConfig | None = None
     """Evaluation configuration."""
-
-    pedagogy: PedagogyConfig = PedagogyConfig()
-
-    pre_batch_filters: list[FilterConfig] = [
-        GibberishFilterConfig(enforce=False),
-        RepetitionFilterConfig(enforce=False),
-        ZeroAdvantageFilterConfig(enforce=False),
-    ]
-    """Filters applied *before* a rollout enters the training batch buffer.
-    All three filter types are registered in monitor mode by default; flip ``enforce=true`` per type
-    to drop matching rollouts before they consume a slot in the batch (e.g. a zero-advantage group
-    never makes it into a training batch)."""
-
-    post_batch_filters: list[FilterConfig] = [
-        GibberishFilterConfig(),
-        RepetitionFilterConfig(),
-        ZeroAdvantageFilterConfig(),
-    ]
-    """Filters applied *after* a batch has been assembled. Each filter annotates each rollout;
-    rollouts flagged by an enforcing filter are still recorded but not shipped to the trainer."""
 
     log: LogConfig = LogConfig()
 
     wandb: WandbMonitorConfig | None = None
 
     prime_monitor: PrimeMonitorConfig | None = None
-
-    collect_inference_metrics: bool = True
-    """Collect inference-server metrics (requires wandb)."""
-
-    inference_metrics_roles: list[Literal["prefill", "decode"]] | None = None
-    """Role for each student admin client when collecting P/D inference metrics."""
-
-    ckpt: CheckpointConfig | None = None
-    """Checkpoint configuration."""
 
     weight_broadcast: WeightBroadcastConfig = FileSystemWeightBroadcastConfig()
     """Transport used to receive updated weights from the trainer."""
@@ -638,14 +280,8 @@ class OrchestratorConfig(BaseConfig):
     output_dir: Path = Path("outputs/run_default")
     """Directory to write outputs to — checkpoints, weights, rollouts, and logs are written as subdirectories. Should be a persistent directory with enough disk space and unique per experiment running on a single node."""
 
-    tasks_per_minute: int | None = Field(None, ge=1)
-    """Rate limit per environment worker, in tasks per minute. Recommended for sandbox-backed environments to prevent sandbox-not-ready errors during autoscaling. With multiple workers, the effective total rate is ``workers × this value``. None disables rate limiting."""
-
     batch_size: int | None = Field(None, ge=1)
-    """Samples to train on per step (rollout-based batching). Set this OR ``token_batch_size``."""
-
-    token_batch_size: int | None = Field(None, ge=1)
-    """Tokens to train on per step (token-based batching). Set this OR ``batch_size``."""
+    """Samples to train on per step."""
 
     buffer: BufferConfig = BufferConfig()
 
@@ -671,22 +307,8 @@ class OrchestratorConfig(BaseConfig):
     max_steps: int | None = None
     """Maximum training steps. If None, runs indefinitely."""
 
-    max_off_policy_steps: int = Field(8, ge=0)
-    """Maximum policies allowed to generate a single rollout. Rollouts generated more than ``max_off_policy_steps`` ahead of training are discarded. Higher values yield better throughput at the cost of off-policy noise."""
-
-    bench: bool = False
-    """Benchmark mode. Sets ``max_steps`` to 5 and disables W&B."""
-
-    heartbeat: HeartbeatConfig | None = None
-    """BetterStack heartbeat configuration for monitoring training progress."""
-
-    env_install_prerelease: bool = False
-    """Allow pre-release versions when installing environments (e.g. ``verifiers>=0.1.12.dev5``). Passes ``--prerelease`` to ``prime env install``."""
-
-    experimental: OrchestratorExperimentalConfig = OrchestratorExperimentalConfig()
-
     @property
-    def model(self) -> ModelConfig:
+    def model(self) -> BaseModelConfig:
         return self.student.model
 
     @model_validator(mode="before")
@@ -699,11 +321,7 @@ class OrchestratorConfig(BaseConfig):
 
         - [orchestrator.client.*]     -> [orchestrator.student.client.*]
         - [orchestrator.model.<k>]    -> [orchestrator.student.model.<k>]
-          (where <k> is any ModelConfig field)
-
-        Teacher must always be configured under [orchestrator.teacher.*]
-        (no equivalent shortcut), because rl mode forbids a teacher and we
-        don't want the same shortcut to silently route to two different roles.
+          (where <k> is any model config field)
         """
         if not isinstance(data, dict):
             return data
@@ -740,8 +358,8 @@ class OrchestratorConfig(BaseConfig):
                 # Mismatched types - put it back and let pydantic surface the error.
                 data["model"] = legacy_model
 
-        # 3. Re-nest flat ModelConfig keys under student.model.
-        model_only_keys = set(ModelConfig.model_fields)
+        # 3. Re-nest flat model keys under student.model.
+        model_only_keys = set(BaseModelConfig.model_fields)
         student = data.get("student")
         if isinstance(student, dict):
             flat = {k: student.pop(k) for k in list(student) if k in model_only_keys}
@@ -802,35 +420,6 @@ class OrchestratorConfig(BaseConfig):
         return self
 
     @model_validator(mode="after")
-    def validate_unique_filter_types(self):
-        for slot_name in ("pre_batch_filters", "post_batch_filters"):
-            types = [f.type for f in getattr(self, slot_name)]
-            if len(types) != len(set(types)):
-                raise ValueError(
-                    f"Duplicate filter types in {slot_name}: {types}. Each filter type may only appear once per slot."
-                )
-        return self
-
-    @model_validator(mode="after")
-    def _force_no_renderer_for_sft(self):
-        """Teacher-backed SFT rolls out via the teacher's plain chat-completions
-        endpoint; the renderer client doesn't apply. When no teacher is
-        configured, SFT uses the student rollout path and keeps the renderer."""
-        if self.training_mode == "sft" and self.teacher is not None:
-            self.renderer = None
-        return self
-
-    @model_validator(mode="after")
-    def validate_training_mode(self):
-        """Enforce training mode invariants that involve only orchestrator fields."""
-        has_teacher = self.teacher is not None
-        if self.training_mode == "rl" and has_teacher:
-            raise ValueError("orchestrator.teacher must not be set when training_mode = 'rl'.")
-        if self.training_mode == "opd" and not has_teacher:
-            raise ValueError("orchestrator.teacher must be configured when training_mode = 'opd'.")
-        return self
-
-    @model_validator(mode="after")
     def validate_renderer_auto_resolves(self):
         """Reject the silent DefaultRenderer fallback at config time.
 
@@ -866,35 +455,20 @@ class OrchestratorConfig(BaseConfig):
 
     @model_validator(mode="after")
     def resolve_batching(self):
-        has_rollout_batch = self.batch_size is not None
-        has_token_batch = self.token_batch_size is not None
-
-        if has_rollout_batch and has_token_batch:
-            raise ValueError("Set exactly one of batch_size or token_batch_size")
-
-        if not has_rollout_batch and not has_token_batch:
+        if self.batch_size is None:
             self.batch_size = 128
-
-        if has_token_batch:
-            if self.oversampling_factor is not None:
-                raise ValueError("oversampling_factor can only be set when batch_size is set")
-            if self.max_inflight_rollouts is None:
-                raise ValueError("max_inflight_rollouts must be set when token_batch_size is set")
-        else:
-            assert self.batch_size is not None
-            if self.batch_size % self.group_size != 0:
-                raise ValueError("Batch size must be divisible by the number of samples per problem")
-            oversampling_factor = self.oversampling_factor if self.oversampling_factor is not None else 1.0
-            resolved_max_inflight_rollouts = max(
-                self.group_size,
-                int(self.batch_size * oversampling_factor),
-            )
-            if self.max_inflight_rollouts is not None and self.oversampling_factor is not None:
-                expected_max_inflight_rollouts = resolved_max_inflight_rollouts
-                if self.max_inflight_rollouts != expected_max_inflight_rollouts:
-                    raise ValueError("max_inflight_rollouts conflicts with oversampling_factor * batch_size")
-            if self.max_inflight_rollouts is None:
-                self.max_inflight_rollouts = resolved_max_inflight_rollouts
+        if self.batch_size % self.group_size != 0:
+            raise ValueError("Batch size must be divisible by the number of samples per problem")
+        oversampling_factor = self.oversampling_factor if self.oversampling_factor is not None else 1.0
+        resolved_max_inflight_rollouts = max(
+            self.group_size,
+            int(self.batch_size * oversampling_factor),
+        )
+        if self.max_inflight_rollouts is not None and self.oversampling_factor is not None:
+            if self.max_inflight_rollouts != resolved_max_inflight_rollouts:
+                raise ValueError("max_inflight_rollouts conflicts with oversampling_factor * batch_size")
+        if self.max_inflight_rollouts is None:
+            self.max_inflight_rollouts = resolved_max_inflight_rollouts
 
         if self.max_inflight_rollouts is not None and self.max_inflight_rollouts < self.group_size:
             raise ValueError("max_inflight_rollouts must be at least the number of rollouts per example")
@@ -913,23 +487,11 @@ class OrchestratorConfig(BaseConfig):
         return self
 
     @model_validator(mode="after")
-    def auto_setup_bench(self):
-        if self.bench:
-            self.max_steps = 4  # Run for 1 warmup step + 3 evaluation steps
-
-            # Disable evaluation
-            self.eval = None
-
-        return self
-
-    @model_validator(mode="after")
     def resolve_env_config(self):
         """Populate extra_env_kwargs and vLLM sampling defaults from top-level fields."""
-        is_vllm = self.training_mode != "sft"
         for env in self.train.env:
             env.extra_env_kwargs.update(max_seq_len=self.seq_len)
-            if is_vllm:
-                env.sampling.extra_body.setdefault("top_k", -1)
-                env.sampling.extra_body.setdefault("min_p", 0.0)
-                env.sampling.extra_body.setdefault("return_token_ids", True)
+            env.sampling.extra_body.setdefault("top_k", -1)
+            env.sampling.extra_body.setdefault("min_p", 0.0)
+            env.sampling.extra_body.setdefault("return_token_ids", True)
         return self
