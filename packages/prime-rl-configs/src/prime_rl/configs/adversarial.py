@@ -109,8 +109,10 @@ class AdversarialRoleConfig(BaseConfig):
         if self.weight_broadcast is not None:
             self._propagate_weight_broadcast()
         if self.rollout_transport is not None:
-            self.trainer.rollout_transport = self.rollout_transport.model_copy(deep=True)
             self.orchestrator.rollout_transport = self.rollout_transport.model_copy(deep=True)
+        # The trainer must consume batches over the same transport the orchestrator
+        # sends on (the upstream trainer default is ZMQ, ours is filesystem).
+        self.trainer.rollout_transport = self.orchestrator.rollout_transport.model_copy(deep=True)
         if self.resume is not None:
             self.trainer.resume = self.resume.model_copy(deep=True)
         if self.wandb is not None:
@@ -179,7 +181,7 @@ class AdversarialRLConfig(BaseConfig):
         run = run.model_copy(deep=True)
         run.output_dir = output_dir
         run.trainer.output_dir = output_dir
-        run.orchestrator.output_dir = output_dir / "run_default"
+        run.orchestrator.output_dir = output_dir
         if self.clean_output_dir:
             run.clean = True
         return run
