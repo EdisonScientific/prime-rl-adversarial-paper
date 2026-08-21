@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import multiprocessing as mp
 from multiprocessing.process import BaseProcess
 from pathlib import Path
