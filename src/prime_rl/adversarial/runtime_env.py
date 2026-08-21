@@ -13,7 +13,12 @@ STATE_COLUMNS = ["trajectory"]
 
 
 class Env:
-    """Wraps a vf.Environment - only exposes features used in PRIME-RL."""
+    """Env-server lifecycle around a legacy ``vf.Environment``.
+
+    The adversarial port runs on legacy verifiers (dict rollouts), so it can't
+    use ``prime_rl.orchestrator.envs`` — the upstream equivalent of this file
+    built on ``verifiers.v1``. Migrating the envs to v1 replaces this module.
+    """
 
     def __init__(self, config: EnvConfig):
         self.config = config
