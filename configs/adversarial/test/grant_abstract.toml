@@ -12,6 +12,11 @@ name = "Qwen/Qwen3-0.6B"
 project = "testing-adversarial"
 name = "adversarial-test-grant-abstract"
 
+[generator.weight_broadcast]
+type = "nccl"
+port = 29541
+timeout = 3600
+
 [generator.deployment]
 type = "single_node"
 gpus_per_node = 4
@@ -47,6 +52,11 @@ seq_len = 2048
 
 [judge.model]
 name = "Qwen/Qwen3-0.6B"
+
+[judge.weight_broadcast]
+type = "nccl"
+port = 29542
+timeout = 3600
 
 [judge.deployment]
 type = "single_node"
