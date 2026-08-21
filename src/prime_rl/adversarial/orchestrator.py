@@ -505,14 +505,14 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 exclude_keys={"trajectory"},
             )
             eval_log_values = {
-                "adversarial/eval/generator/reward": fmean(float(rollout["reward"]) for rollout in eval_rollouts),
-                "adversarial/eval/generator/verifiable_reward": fmean(
+                "eval/generator/reward/mean": fmean(float(rollout["reward"]) for rollout in eval_rollouts),
+                "eval/generator/metrics/verifiable_reward/mean": fmean(
                     float(r["metrics"]["verifiable_reward"]) for r in eval_rollouts
                 ),
             }
             await monitors.log(eval_log_values, step=0)
             logger.success(
-                f"Step 0 eval | Eval reward: {eval_log_values['adversarial/eval/generator/reward']:.4f}"
+                f"Step 0 eval | Eval reward: {eval_log_values['eval/generator/reward/mean']:.4f}"
             )
 
         for step in range(start_step, get_max_steps(config.generator)):
@@ -573,22 +573,22 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             generator_completion_lens = [float(get_model_completion_len(r)) for r in generator_rollouts]
             judge_completion_lens = [float(get_model_completion_len(r)) for r in scored.judge_rollouts]
             log_values = {
-                "adversarial/generator/reward": fmean(scored.generator_rewards),
-                "adversarial/generator/verifiable_reward": generator_verifiable_reward,
-                "adversarial/judge/accuracy": judge_accuracy,
-                "adversarial/judge/generated_accuracy": fmean(generated_judge_rewards) if generated_judge_rewards else 0.0,
-                "adversarial/judge/reference_accuracy": fmean(reference_judge_rewards) if reference_judge_rewards else 0.0,
-                "adversarial/generator/completion_tokens/mean": fmean(generator_completion_lens),
-                "adversarial/generator/completion_tokens/min": min(generator_completion_lens, default=0.0),
-                "adversarial/generator/completion_tokens/max": max(generator_completion_lens, default=0.0),
-                "adversarial/judge/completion_tokens/mean": fmean(judge_completion_lens) if judge_completion_lens else 0.0,
-                "adversarial/judge/completion_tokens/min": min(judge_completion_lens, default=0.0),
-                "adversarial/judge/completion_tokens/max": max(judge_completion_lens, default=0.0),
-                "adversarial/judge/update_skipped": float(skip_judge_update),
-                "adversarial/step_time_seconds": time.perf_counter() - step_start,
+                "train/generator/reward/mean": fmean(scored.generator_rewards),
+                "train/generator/metrics/verifiable_reward/mean": generator_verifiable_reward,
+                "train/judge/reward/mean": judge_accuracy,
+                "train/judge/metrics/generated_accuracy/mean": fmean(generated_judge_rewards) if generated_judge_rewards else 0.0,
+                "train/judge/metrics/reference_accuracy/mean": fmean(reference_judge_rewards) if reference_judge_rewards else 0.0,
+                "train/generator/num_output_tokens/mean": fmean(generator_completion_lens),
+                "train/generator/num_output_tokens/min": min(generator_completion_lens, default=0.0),
+                "train/generator/num_output_tokens/max": max(generator_completion_lens, default=0.0),
+                "train/judge/num_output_tokens/mean": fmean(judge_completion_lens) if judge_completion_lens else 0.0,
+                "train/judge/num_output_tokens/min": min(judge_completion_lens, default=0.0),
+                "train/judge/num_output_tokens/max": max(judge_completion_lens, default=0.0),
+                "train/judge/update_skipped": float(skip_judge_update),
+                "time/step": time.perf_counter() - step_start,
             }
             if judge_gate_state.accuracy_ema is not None:
-                log_values["adversarial/judge/accuracy_ema"] = judge_gate_state.accuracy_ema
+                log_values["train/judge/accuracy_ema"] = judge_gate_state.accuracy_ema
             if eval_config is not None and (step + 1) % eval_config.interval == 0:
                 eval_rollouts = await run_generator_eval(
                     generator,
@@ -602,18 +602,18 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                     step_path / "eval_generator_rollouts.jsonl",
                     exclude_keys={"trajectory"},
                 )
-                log_values["adversarial/eval/generator/reward"] = fmean(
+                log_values["eval/generator/reward/mean"] = fmean(
                     float(rollout["reward"]) for rollout in eval_rollouts
                 )
-                log_values["adversarial/eval/generator/verifiable_reward"] = fmean(
+                log_values["eval/generator/metrics/verifiable_reward/mean"] = fmean(
                     float(r["metrics"]["verifiable_reward"]) for r in eval_rollouts
                 )
             await monitors.log(log_values, step=step)
             logger.success(
                 f"Step {step} | Time: {time.perf_counter() - step_start:.2f}s | "
-                f"Gen reward: {log_values['adversarial/generator/reward']:.4f} | "
-                f"Gen verifiable: {log_values['adversarial/generator/verifiable_reward']:.4f} | "
-                f"Judge acc: {log_values['adversarial/judge/accuracy']:.4f} | "
+                f"Gen reward: {log_values['train/generator/reward/mean']:.4f} | "
+                f"Gen verifiable: {log_values['train/generator/metrics/verifiable_reward/mean']:.4f} | "
+                f"Judge acc: {log_values['train/judge/reward/mean']:.4f} | "
                 f"Judge skip: {int(skip_judge_update)}"
             )
     finally:
