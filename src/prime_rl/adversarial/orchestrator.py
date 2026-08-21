@@ -17,7 +17,8 @@ from prime_rl.adversarial.utils import get_model_completion_len, save_rollouts
 from prime_rl.configs.adversarial import AdversarialRLConfig, AdversarialRoleConfig
 from prime_rl.orchestrator.packing import BatchPacker
 from prime_rl.trainer.model import setup_tokenizer
-from prime_rl.transport import TrainingSample, setup_micro_batch_sender
+from prime_rl.transports.rollouts import setup_micro_batch_sender
+from prime_rl.transports.rollouts.types import TrainingSample
 from prime_rl.utils.client import InferencePool, init_nccl_broadcast
 from prime_rl.utils.config import cli
 from prime_rl.utils.logger import get_logger, setup_logger
