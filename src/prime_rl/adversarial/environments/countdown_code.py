@@ -12,7 +12,7 @@ from typing import Any
 import verifiers as vf
 from datasets import Dataset, load_dataset, load_from_disk
 
-from prime_rl.adversarial.environments.base import GeneratorEnv
+from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
 from prime_rl.adversarial.utils import completion_has_reasoning, strip_think, to_text
 
@@ -315,8 +315,6 @@ def load_countdown_source_datasets(dataset_name: str, split: str, seed: int) -> 
         loaded = load_from_disk(str(source_path))
         if isinstance(loaded, Dataset):
             return loaded.shuffle(seed=seed), None
-        if split not in loaded:
-            raise ValueError(f"Local Countdown-Code dataset has no split {split!r}: {dataset_name}")
         eval_dataset = loaded["eval"].shuffle(seed=seed) if "eval" in loaded and split == "train" else None
         return loaded[split].shuffle(seed=seed), eval_dataset
 
@@ -347,21 +345,8 @@ def build_countdown_code_datasets(
         reference, reference_expr = countdown_verified_reference_from_row(row, numbers, target)
         question = countdown_prompt(numbers, target)
         rows.append(
-            {
-                "example_id": example_id,
-                "prompt": [{"role": "user", "content": question}],
-                "answer": reference,
-                "info": {
-                    "question": question,
-                    "reference": reference,
-                    "numbers": numbers,
-                    "target": target,
-                    "reference_expr": reference_expr,
-                },
-            }
+            make_example(example_id, question, reference, info={"numbers": numbers, "target": target})
         )
-    if not rows:
-        raise ValueError(f"No Countdown-Code examples found in {dataset_name!r} split={split!r}.")
     if num_examples is None:
         return Dataset.from_list(rows), None
     train_rows = rows[:num_examples]
@@ -375,18 +360,7 @@ def build_countdown_code_datasets(
             reference, reference_expr = countdown_verified_reference_from_row(row, numbers, target)
             question = countdown_prompt(numbers, target)
             eval_source_rows.append(
-                {
-                    "example_id": eval_id,
-                    "prompt": [{"role": "user", "content": question}],
-                    "answer": reference,
-                    "info": {
-                        "question": question,
-                        "reference": reference,
-                        "numbers": numbers,
-                        "target": target,
-                        "reference_expr": reference_expr,
-                    },
-                }
+                make_example(eval_id, question, reference, info={"numbers": numbers, "target": target})
             )
     eval_rows = eval_source_rows[: num_eval_examples or 0]
     if num_eval_examples and len(eval_rows) < num_eval_examples:
@@ -427,10 +401,6 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
             return countdown_judge_task([int(number) for number in info["numbers"]], int(info["target"]))
         return str(info.get("question") or example["prompt"][-1]["content"])
 
-    def adversarial_reference_answer(self, example: dict[str, Any]) -> str:
-        info = example.get("info") or {}
-        return str(info.get("reference") or example["answer"])
-
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
         files = countdown_load_json_from_response(completion)
         if files is None:
@@ -463,5 +433,3 @@ def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
         return BinaryJudgeEnv(**kwargs)
     raise ValueError("countdown_code adversarial env kind must be generator or judge.")
 
-
-__all__ = ["CountdownCodeGeneratorEnv", "BinaryJudgeEnv", "load_environment"]

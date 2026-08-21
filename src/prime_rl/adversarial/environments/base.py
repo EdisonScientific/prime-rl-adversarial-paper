@@ -1,6 +1,33 @@
-from typing import Any
+import random
+from typing import Any, Iterable
 
 import verifiers as vf
+
+
+def make_example(example_id: int, question: str, answer: str, info: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A dataset row in the shape all adversarial envs share."""
+    return {
+        "example_id": example_id,
+        "prompt": [{"role": "user", "content": question}],
+        "answer": answer,
+        "info": {"question": question, "reference": answer, **(info or {})},
+    }
+
+
+def reservoir_sample(rows: Iterable[dict[str, Any]], num_examples: int | None, seed: int) -> list[dict[str, Any]]:
+    """Uniform one-pass sample of ``num_examples`` rows (``None`` keeps everything)."""
+    if num_examples is None:
+        return list(rows)
+    rng = random.Random(seed)
+    sample: list[dict[str, Any]] = []
+    for num_seen, row in enumerate(rows, start=1):
+        if len(sample) < num_examples:
+            sample.append(row)
+        else:
+            replacement_index = rng.randrange(num_seen)
+            if replacement_index < num_examples:
+                sample[replacement_index] = row
+    return sample
 
 
 class GeneratorEnv(vf.SingleTurnEnv):
@@ -20,6 +47,9 @@ class GeneratorEnv(vf.SingleTurnEnv):
     - ``adversarial_judge_prompt(question, candidate)``: the A/B classification
       prompt for the judge.
     """
+
+    judge_task_label = "Task"
+    judge_candidate_label = "Candidate answer"
 
     def __init__(self, **kwargs: Any):
         kwargs.setdefault("rubric", vf.Rubric(funcs=[self.placeholder_reward]))
@@ -43,7 +73,8 @@ class GeneratorEnv(vf.SingleTurnEnv):
         return str(info.get("question") or example["prompt"][-1]["content"])
 
     def adversarial_reference_answer(self, example: dict[str, Any]) -> str:
-        raise NotImplementedError
+        info = example.get("info") or {}
+        return str(info.get("reference") or example["answer"])
 
     def adversarial_candidate_answer(self, completion: Any) -> Any:
         raise NotImplementedError
@@ -52,4 +83,8 @@ class GeneratorEnv(vf.SingleTurnEnv):
         raise NotImplementedError
 
     def adversarial_judge_prompt(self, question: str, candidate: Any) -> str:
-        raise NotImplementedError
+        return (
+            f"{self.judge_task_label}:\n{question}\n\n"
+            f"{self.judge_candidate_label}:\n{candidate}\n\n"
+            "Classify the candidate as A (reference answer) or B (model-generated answer)."
+        )

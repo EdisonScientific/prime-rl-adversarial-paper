@@ -1,6 +1,5 @@
 import ast
 import os
-import random
 import re
 from collections import Counter
 from pathlib import Path
@@ -12,7 +11,7 @@ import pyarrow.ipc as pa_ipc
 import verifiers as vf
 from datasets import Dataset, load_dataset
 
-from prime_rl.adversarial.environments.base import GeneratorEnv
+from prime_rl.adversarial.environments.base import GeneratorEnv, make_example, reservoir_sample
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
 from prime_rl.adversarial.utils import collapse_whitespace, extract_strict_think_answer_text
 
@@ -84,70 +83,37 @@ def build_ether0_smiles_to_formula_dataset(
     arrow_cache_dir = os.environ.get("ETHER0_MOLRQA2_ARROW_DIR")
     if dataset_name == "futurehouse/molrqa2" and arrow_cache_dir:
         arrow_path = Path(arrow_cache_dir) / f"molrqa2-{split}.arrow"
-        rng = random.Random(seed)
-        examples = []
-        num_seen = 0
-        with pa.memory_map(arrow_path.as_posix(), "r") as source:
-            for batch in pa_ipc.open_stream(source):
-                if problem_type:
-                    batch = batch.filter(pc.equal(batch["problem_type"], problem_type))
-                for row in batch.to_pylist():
-                    if num_examples is None:
-                        examples.append(row)
-                        continue
-                    num_seen += 1
-                    if len(examples) < num_examples:
-                        examples.append(row)
-                        continue
-                    replacement_index = rng.randrange(num_seen)
-                    if replacement_index < num_examples:
-                        examples[replacement_index] = row
-        dataset = examples
+
+        def arrow_rows():
+            with pa.memory_map(arrow_path.as_posix(), "r") as source:
+                for batch in pa_ipc.open_stream(source):
+                    if problem_type:
+                        batch = batch.filter(pc.equal(batch["problem_type"], problem_type))
+                    yield from batch.to_pylist()
+
+        dataset = reservoir_sample(arrow_rows(), num_examples, seed)
     else:
-        dataset = load_dataset(dataset_name, split=split, token=token)
-        if num_examples is not None:
-            rng = random.Random(seed)
-            examples = []
-            num_seen = 0
-            for row in dataset:
-                if problem_type and row.get("problem_type") != problem_type:
-                    continue
-                num_seen += 1
-                if len(examples) < num_examples:
-                    examples.append(row)
-                    continue
-                replacement_index = rng.randrange(num_seen)
-                if replacement_index < num_examples:
-                    examples[replacement_index] = row
-            dataset = examples
-        elif problem_type:
-            dataset = dataset.filter(lambda row: row.get("problem_type") == problem_type)
+        source = load_dataset(dataset_name, split=split, token=token)
+        dataset = reservoir_sample(
+            (row for row in source if not problem_type or row.get("problem_type") == problem_type),
+            num_examples,
+            seed,
+        )
 
     rows = []
     for example_id, row in enumerate(dataset):
         reference_smiles = text_field(row, "ideal", "answer", "reference")
-        solution = row.get("solution")
-        if solution is None:
-            raise ValueError("Ether0 examples require a solution field for reward evaluation.")
+        solution = row["solution"]
         target_formula = ether0_target_formula(solution)
         question = "Compute the molecular formula for this SMILES string.\n\n" f"SMILES:\n{reference_smiles}"
         rows.append(
-            {
-                "example_id": example_id,
-                "prompt": [{"role": "user", "content": question}],
-                "answer": target_formula,
-                "info": {
-                    "question": question,
-                    "reference": target_formula,
-                    "reference_smiles": reference_smiles,
-                    "solution": solution,
-                    "target_formula": target_formula,
-                    "problem_type": row.get("problem_type"),
-                },
-            }
+            make_example(
+                example_id,
+                question,
+                target_formula,
+                info={"reference_smiles": reference_smiles, "solution": solution},
+            )
         )
-    if not rows:
-        raise ValueError(f"No Ether0 examples found in {dataset_name} split={split!r} problem_type={problem_type!r}")
     return Dataset.from_list(rows)
 
 
@@ -208,6 +174,9 @@ def ether0_formula_answer_metrics(candidate_formula: str | None, solution: Any) 
 
 class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
     """Ether0 diagnostic env: compute molecular formulas from reference SMILES."""
+
+    judge_task_label = "Chemistry question"
+    judge_candidate_label = "Candidate molecular formula"
 
     def __init__(
         self,
@@ -272,21 +241,12 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
         eval_count = self._num_eval_examples or 0
         train_count = self._dataset_args["num_examples"]
         train_end = len(full_dataset) if train_count is None else eval_count + train_count
-        if len(full_dataset) < train_end:
-            raise ValueError(
-                f"Ether0 train holdout requested {train_count} train and {eval_count} eval examples, "
-                f"but only {len(full_dataset)} examples are available."
-            )
         return full_dataset.select(range(eval_count, train_end)), full_dataset.select(range(eval_count))
 
     def _build_system_prompt(self) -> str:
         return ETHER0_SMILES_TO_FORMULA_SYSTEM_PROMPT + (
             ETHER0_SMILES_TO_FORMULA_HINT if self._formula_l1_hint else ""
         )
-
-    def adversarial_reference_answer(self, example: dict[str, Any]) -> str:
-        info = example.get("info") or {}
-        return str(info.get("target_formula") or info.get("reference") or example["answer"])
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
         answer = extract_strict_think_answer_text(completion)
@@ -302,13 +262,6 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
         format_ok = candidate is not None and metrics["valid_formula"] == 1.0
         return self.generator_result(candidate, format_ok, float(format_ok and metrics["formula_l1_distance"] == 0.0))
 
-    def adversarial_judge_prompt(self, question: str, candidate: str) -> str:
-        return (
-            f"Chemistry question:\n{question}\n\n"
-            f"Candidate molecular formula:\n{candidate}\n\n"
-            "Classify the candidate as A (reference answer) or B (model-generated answer)."
-        )
-
 
 def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
     if kind == "generator":
@@ -317,5 +270,3 @@ def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
         return BinaryJudgeEnv(**kwargs)
     raise ValueError("smiles_to_formula adversarial env kind must be generator or judge.")
 
-
-__all__ = ["Ether0SmilesToFormulaGeneratorEnv", "BinaryJudgeEnv", "load_environment"]

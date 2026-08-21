@@ -44,5 +44,3 @@ class BinaryJudgeEnv(vf.SingleTurnEnv):
                 return chosen_probability if choice == "A" else 1.0 - chosen_probability
         return None
 
-
-__all__ = ["BinaryJudgeEnv", "JUDGE_SYSTEM_PROMPT"]

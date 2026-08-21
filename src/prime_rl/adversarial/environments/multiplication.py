@@ -5,7 +5,7 @@ from typing import Any
 import verifiers as vf
 from datasets import Dataset
 
-from prime_rl.adversarial.environments.base import GeneratorEnv
+from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
 from prime_rl.adversarial.utils import extract_strict_think_answer_text
 
@@ -34,32 +34,20 @@ def build_multiplication_dataset(n_digits: int, num_examples: int, seed: int) ->
         right = rng.randint(low, high)
         product = left * right
         question = f"What is {left} multiplied by {right}?"
-        rows.append(
-            {
-                "example_id": example_id,
-                "prompt": [{"role": "user", "content": question}],
-                "answer": str(product),
-                "info": {"left": left, "right": right, "product": product, "question": question},
-            }
-        )
+        rows.append(make_example(example_id, question, str(product), info={"product": product}))
     return Dataset.from_list(rows)
 
 
 class MultiplicationGeneratorEnv(GeneratorEnv):
     """Four-digit multiplication env used by the adversarial experiments."""
 
+    judge_task_label = "Problem"
+
     def __init__(self, n_digits: int = 3, num_examples: int = 10_000, seed: int = 0, **_: Any):
         super().__init__(
             dataset=build_multiplication_dataset(n_digits=n_digits, num_examples=num_examples, seed=seed),
             system_prompt=MULTIPLICATION_GENERATOR_SYSTEM_PROMPT,
         )
-
-    def adversarial_target(self, example: dict[str, Any]) -> int:
-        info = example.get("info") or {}
-        return int(info.get("product") or info.get("target") or str(example["answer"]).strip().replace(",", ""))
-
-    def adversarial_reference_answer(self, example: dict[str, Any]) -> str:
-        return str(self.adversarial_target(example))
 
     def adversarial_candidate_answer(self, completion: Any) -> int | None:
         answer = extract_strict_think_answer_text(completion)
@@ -71,17 +59,10 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
         return int(answer.replace(",", ""))
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
-        target = self.adversarial_target(example)
+        target = int((example.get("info") or {})["product"])
         parsed = self.adversarial_candidate_answer(completion)
         format_ok = parsed is not None
         return self.generator_result(parsed, format_ok, float(format_ok and parsed == target))
-
-    def adversarial_judge_prompt(self, question: str, candidate: int | str) -> str:
-        return (
-            f"Problem: {question}\n"
-            f"Candidate answer: {candidate}\n\n"
-            "Classify the candidate as A (exact-product reference) or B (model-generated)."
-        )
 
 
 def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
@@ -91,5 +72,3 @@ def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
         return BinaryJudgeEnv(**kwargs)
     raise ValueError("multiplication adversarial env kind must be generator or judge.")
 
-
-__all__ = ["MultiplicationGeneratorEnv", "BinaryJudgeEnv", "load_environment"]
