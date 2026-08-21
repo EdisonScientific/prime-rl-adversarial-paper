@@ -9,7 +9,7 @@ from datasets import Dataset
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
-from prime_rl.adversarial.utils import collapse_whitespace, extract_strict_answer_only_text
+from prime_rl.adversarial.utils import collapse_whitespace, extract_answer
 
 WORD_RE = re.compile(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?")
 
@@ -97,7 +97,7 @@ class PaperAbstractGeneratorEnv(GeneratorEnv):
         )
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
-        answer = extract_strict_answer_only_text(completion)
+        answer = extract_answer(completion, require_think=False)
         if answer is None:
             return None
         abstract = collapse_whitespace(answer).strip().strip('"').strip("'")

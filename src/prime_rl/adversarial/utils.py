@@ -10,13 +10,12 @@ from prime_rl.transports.rollouts.types import TrainingSample
 from prime_rl.utils.chat_template import deserialize_tool_calls, normalize_messages
 from prime_rl.utils.logger import get_logger
 
-CHOICE_FALLBACK_RE = re.compile(r"\b([AB])\b", re.IGNORECASE)
-ANSWER_RE = re.compile(r"<answer>(.*?)</answer>", re.DOTALL | re.IGNORECASE)
-STRICT_ANSWER_ONLY_RE = re.compile(r"\s*<answer>(.*?)</answer>\s*\Z", re.DOTALL | re.IGNORECASE)
-STRICT_THINK_ANSWER_RE = re.compile(r"\s*<think>(.*?)</think>\s*<answer>(.*?)</answer>\s*\Z", re.DOTALL | re.IGNORECASE)
+ANSWER_RE = re.compile(r"\s*<answer>(.*?)</answer>\s*\Z", re.DOTALL | re.IGNORECASE)
 
 
-def to_text(completion: Any) -> str:
+def completion_text(completion: Any) -> str:
+    """Final message text; reasoning split off by a vllm reasoning parser is
+    re-wrapped in <think> tags so parsed and raw completions look identical."""
     if isinstance(completion, str):
         return completion
     if not completion:
@@ -31,29 +30,23 @@ def to_text(completion: Any) -> str:
     return str(content or "")
 
 
-def strip_think(text: str) -> str:
-    end = text.rfind("</think>")
-    return text[end + len("</think>") :] if end != -1 else text
+def split_think(completion: Any) -> tuple[str, str]:
+    """``(reasoning, rest)`` around the last ``</think>``. The opening ``<think>``
+    is optional — chat templates and thinking-budget interventions inject tags."""
+    text = completion_text(completion).strip()
+    reasoning, sep, rest = text.rpartition("</think>")
+    if not sep:
+        return "", text
+    return reasoning.removeprefix("<think>").strip(), rest
 
 
-def completion_has_reasoning(completion: Any) -> bool:
-    text = to_text(completion).strip()
-    match = re.match(r"\s*<think>(.*?)</think>", text, re.DOTALL | re.IGNORECASE)
-    return bool(match and match.group(1).strip())
-
-
-def extract_strict_think_answer_text(completion: Any) -> str | None:
-    match = STRICT_THINK_ANSWER_RE.fullmatch(to_text(completion).strip())
-    if not match:
+def extract_answer(completion: Any, *, require_think: bool = True) -> str | None:
+    """The ``<answer>...</answer>`` payload, or None when the completion is not a
+    reasoning block (when required) followed by exactly one answer block."""
+    reasoning, rest = split_think(completion)
+    if require_think and not reasoning:
         return None
-    thought = match.group(1).strip()
-    answer = match.group(2).strip()
-    return answer if thought and answer else None
-
-
-def extract_strict_answer_only_text(completion: Any) -> str | None:
-    text = strip_think(to_text(completion)).strip()
-    match = STRICT_ANSWER_ONLY_RE.fullmatch(text)
+    match = ANSWER_RE.fullmatch(rest)
     if match is None:
         return None
     answer = match.group(1).strip()
@@ -62,20 +55,11 @@ def extract_strict_answer_only_text(completion: Any) -> str | None:
     return answer
 
 
-def extract_answer_text(completion: Any) -> str | None:
-    answers = [answer.strip() for answer in ANSWER_RE.findall(strip_think(to_text(completion)))]
-    answers = [answer for answer in answers if answer]
-    return answers[-1] if answers else None
-
-
 def extract_choice(completion: Any) -> str | None:
-    answer = extract_answer_text(completion)
-    text = answer if answer is not None else strip_think(to_text(completion)).strip()
-    choice = text.strip().upper()
-    if choice in {"A", "B"}:
-        return choice
-    matches = CHOICE_FALLBACK_RE.findall(choice)
-    return matches[-1].upper() if matches else None
+    """A/B judge choice; judges sample with structured outputs, so the completion is the bare letter."""
+    _, rest = split_think(completion)
+    choice = rest.strip().upper()
+    return choice if choice in {"A", "B"} else None
 
 
 def collapse_whitespace(text: str) -> str:

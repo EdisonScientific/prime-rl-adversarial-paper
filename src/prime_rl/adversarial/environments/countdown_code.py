@@ -14,9 +14,7 @@ from datasets import Dataset, load_dataset, load_from_disk
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
-from prime_rl.adversarial.utils import completion_has_reasoning, strip_think, to_text
-
-COUNTDOWN_JSON_RE = re.compile(r"</think>\s*({.*})\s*\Z", re.DOTALL | re.IGNORECASE)
+from prime_rl.adversarial.utils import split_think
 
 COUNTDOWN_CODE_SYSTEM_PROMPT = """\
 You are a helpful coding assistant. Solve the task and return only the requested JSON.
@@ -123,28 +121,20 @@ def countdown_find_expression(numbers: list[int], target: int) -> str | None:
     return search(items)
 
 
-def countdown_load_json_from_response(completion: Any, *, strict: bool = True) -> dict[str, str] | None:
-    if not completion_has_reasoning(completion):
+def countdown_load_json_from_response(completion: Any) -> dict[str, str] | None:
+    reasoning, rest = split_think(completion)
+    if not reasoning:
         return None
-    text = to_text(completion)
-    if strict:
-        candidates = [strip_think(text).strip()]
-    else:
-        match = COUNTDOWN_JSON_RE.search(text)
-        candidates = [match.group(1)] if match is not None else []
-        candidates.append(text[text.find("{") : text.rfind("}") + 1] if "{" in text and "}" in text else "")
-    for candidate in candidates:
-        if not candidate:
-            continue
-        try:
-            parsed = json.loads(candidate.strip())
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            solution = parsed.get("solution.py")
-            test = parsed.get("test.py")
-            if isinstance(solution, str) and isinstance(test, str):
-                return {"solution.py": solution, "test.py": test}
+    try:
+        parsed = json.loads(rest.strip())
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    solution = parsed.get("solution.py")
+    test = parsed.get("test.py")
+    if isinstance(solution, str) and isinstance(test, str):
+        return {"solution.py": solution, "test.py": test}
     return None
 
 

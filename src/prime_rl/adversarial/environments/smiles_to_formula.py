@@ -13,7 +13,7 @@ from datasets import Dataset, load_dataset
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example, reservoir_sample
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
-from prime_rl.adversarial.utils import collapse_whitespace, extract_strict_think_answer_text
+from prime_rl.adversarial.utils import collapse_whitespace, extract_answer
 
 FORMULA_RE = re.compile(r"([A-Z][a-z]?)(\d*)")
 
@@ -249,7 +249,7 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
         )
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
-        answer = extract_strict_think_answer_text(completion)
+        answer = extract_answer(completion)
         if answer is None:
             return None
         answer = collapse_whitespace(answer)
