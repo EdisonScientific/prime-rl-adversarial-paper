@@ -1,7 +1,6 @@
 output_dir = "/home/abou/data/rl/adversarial-countdown-code-judge-qwen3-1p7bgen-32bjudge-b64r8-jb128-jctx2k-nccl-max8192-seq16k-train15k-eval800-eval250-step0eval-stablehparams-4nodejtrain-localcopy-10k-d14d-v1"
 clean_output_dir = false
 generator_reward_mode = "judge"
-judge_objective = "single_candidate"
 
 [log]
 level = "debug"
@@ -113,10 +112,6 @@ name = "adversarial-countdown-code-judge-qwen3-1p7bgen-32bjudge-b64r8-jb128-jctx
 type = "nccl"
 port = 29513
 timeout = 3600
-
-[judge.slurm]
-partition = "gpu"
-time = "14-00:00:00"
 
 [judge.deployment]
 type = "multi_node"

@@ -1,7 +1,6 @@
 output_dir = "/home/abou/data/rl/adversarial-countdown-code-judge-qwen3-1p7bgen-1p7bjudge-b64r8-nccl-max8192-seq16k-train15k-eval800-eval250-step0eval-stablehparams-10k-d14d-v1"
 clean_output_dir = false
 generator_reward_mode = "judge"
-judge_objective = "single_candidate"
 
 [log]
 level = "debug"

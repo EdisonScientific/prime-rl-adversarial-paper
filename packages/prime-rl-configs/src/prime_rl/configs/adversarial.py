@@ -22,7 +22,7 @@ from prime_rl.configs.rl import (
     SharedWeightBroadcastConfig,
     SingleNodeDeploymentConfig,
 )
-from prime_rl.configs.shared import EnvVars, ResumeConfig, RunConfig, SlurmConfig, TransportConfig
+from prime_rl.configs.shared import ResumeConfig, TransportConfig
 from prime_rl.configs.trainer import CheckpointConfig as TrainerCheckpointConfig
 from prime_rl.configs.trainer import (
     FileSystemWeightBroadcastConfig as TrainerFileSystemWeightBroadcastConfig,
@@ -38,41 +38,57 @@ from prime_rl.utils.config import BaseConfig
 
 
 class JudgeUpdateGateConfig(BaseConfig):
-    """Optionally skip judge updates when the judge is already too accurate."""
-
     enabled: bool = False
+    """Skip judge updates while the judge is accurate enough."""
+
     accuracy_threshold: float = Field(0.9, ge=0.0, le=1.0)
+    """Skip the judge update when the accuracy EMA is at or above this."""
+
     ema_decay: float = Field(0.95, ge=0.0, lt=1.0)
+    """Decay of the judge-accuracy EMA the gate tracks."""
+
     warmup_steps: int = Field(0, ge=0)
+    """Steps to always train the judge before the gate can skip."""
+
     max_skip_streak: int | None = Field(20, ge=1)
+    """Force a judge update after this many consecutive skips. None never forces."""
 
 
 class AdversarialRoleConfig(BaseConfig):
-    """One trainable role in a synchronous adversarial run.
-
-    This intentionally preserves the older adversarial TOML shape while reusing
-    the current trainer and inference config models.
-    """
-
     trainer: TrainerConfig = TrainerConfig()
     orchestrator: AdversarialOrchestratorConfig = AdversarialOrchestratorConfig()
     inference: InferenceConfig | None = None
-    env_vars: EnvVars = {}
-    run: RunConfig = RunConfig()
+    """vLLM server for this role. None reuses an externally managed server."""
+
     output_dir: Path = Path("outputs")
     clean: bool = False
+    """Wipe this role's output_dir before launch."""
+
     log: SharedLogConfig = SharedLogConfig()
     model: SharedModelConfig | None = None
+    """Shared model name, propagated to trainer, orchestrator, and inference."""
+
     tokenizer: TokenizerConfig | None = None
+    """Shared tokenizer, propagated to trainer and orchestrator."""
+
     max_steps: int | None = None
+    """Shared step budget, propagated to trainer and orchestrator."""
+
     seq_len: int | None = None
+    """Shared sequence length, propagated to trainer and orchestrator."""
+
     weight_broadcast: SharedWeightBroadcastConfig | None = None
+    """Shared weight-broadcast transport, propagated to trainer, orchestrator, and inference."""
+
     rollout_transport: TransportConfig | None = None
+    """Shared rollout transport, propagated to trainer and orchestrator."""
+
     resume: ResumeConfig | None = None
     deployment: DeploymentConfig = SingleNodeDeploymentConfig()
-    slurm: SlurmConfig | None = None
-    dry_run: bool = False
+    """GPU/node split between this role's trainer and inference."""
+
     wandb: WandbMonitorConfig | None = None
+    """Shared W&B run, propagated to trainer and orchestrator monitors."""
 
     @model_validator(mode="after")
     def resolve_shared_fields(self):
@@ -135,7 +151,6 @@ class AdversarialRLConfig(BaseConfig):
             )
         ),
     ] = "judge"
-    judge_objective: Literal["single_candidate"] = "single_candidate"
     resume_step: int | None = Field(None, ge=1)
     judge_update_gate: JudgeUpdateGateConfig = JudgeUpdateGateConfig()
     log: SharedLogConfig = SharedLogConfig()
@@ -151,11 +166,6 @@ class AdversarialRLConfig(BaseConfig):
                 raise ValueError("adversarial-rl supports single_node or one-train-one-infer multi_node roles.")
         if self.generator.orchestrator.batch_size is None or self.judge.orchestrator.batch_size is None:
             raise ValueError("adversarial-rl requires fixed generator and judge batch_size.")
-        for run in (self.generator, self.judge):
-            if getattr(run, "teacher_inference", None) is not None or (
-                getattr(run.deployment, "num_teacher_gpus", None) or 0
-            ):
-                raise ValueError("adversarial-rl currently does not support teacher inference.")
         self.generator = self.with_output_dir(self.generator, self.output_dir / "generator")
         self.judge = self.with_output_dir(self.judge, self.output_dir / "judge")
         if self.resume_step is not None:

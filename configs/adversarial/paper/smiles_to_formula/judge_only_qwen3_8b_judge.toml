@@ -1,7 +1,6 @@
 output_dir = "/home/abou/data/rl/adversarial-ether0-smiles2formula-nohint-qwen3-8bgen-8bjudge-b64r8-nccl-strictthink-minprompt-notopk-1node-max4096-lr5e7-jlr1e6-gate75-train17938-eval800-long15k-d14d-20260721"
 clean_output_dir = false
 generator_reward_mode = "judge"
-judge_objective = "single_candidate"
 
 [log]
 level = "debug"

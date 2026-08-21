@@ -1,7 +1,6 @@
 output_dir = "/home/abou/data/rl/adv-grant-nih-32g32j-b1024r16-jb2048-kl5e2-glr2e7-jlr1e7-offpol8-max4096-nodapo-tb1536-rpqwen3-rcfix-cliphi028-gate75-datacleanv1-cleaneval-6n-think-20260815"
 clean_output_dir = false
 generator_reward_mode = "judge"
-judge_objective = "single_candidate"
 
 [log]
 level = "debug"
@@ -26,10 +25,6 @@ name = "adv-grant-nih-32g32j-b1024r16-jb2048-kl5e2-glr2e7-jlr1e7-offpol8-max4096
 type = "nccl"
 port = 30990
 timeout = 3600
-
-[generator.slurm]
-partition = "gpu"
-time = "14-00:00:00"
 
 [generator.deployment]
 type = "multi_node"
@@ -121,10 +116,6 @@ name = "adv-grant-nih-32g32j-b1024r16-jb2048-kl5e2-glr2e7-jlr1e7-offpol8-max4096
 type = "nccl"
 port = 30995
 timeout = 3600
-
-[judge.slurm]
-partition = "gpu"
-time = "14-00:00:00"
 
 [judge.deployment]
 type = "multi_node"
