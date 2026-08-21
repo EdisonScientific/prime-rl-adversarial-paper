@@ -28,6 +28,14 @@ class GeneratorEnv(vf.SingleTurnEnv):
     async def placeholder_reward(self, completions, **kwargs) -> list[float]:
         return [0.0 for _ in completions]
 
+    def generator_result(self, candidate: Any, format_ok: bool, verifiable_reward: float) -> dict[str, Any]:
+        return {
+            "candidate": "" if candidate is None else str(candidate),
+            "format_ok": format_ok,
+            "verifiable_reward": verifiable_reward,
+            "metrics": {"format_reward": float(format_ok), "verifiable_reward": verifiable_reward},
+        }
+
     def adversarial_question(self, example: dict[str, Any]) -> str:
         info = example.get("info") or {}
         return str(info.get("question") or example["prompt"][-1]["content"])

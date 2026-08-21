@@ -300,19 +300,7 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
         candidate = self.adversarial_candidate_answer(completion)
         metrics = ether0_formula_answer_metrics(candidate, info["solution"])
         format_ok = candidate is not None and metrics["valid_formula"] == 1.0
-        verifiable_reward = float(format_ok and metrics["formula_l1_distance"] == 0.0)
-        return {
-            "candidate": "" if candidate is None else candidate,
-            "format_ok": format_ok,
-            "verifiable_reward": verifiable_reward,
-            "metrics": {
-                "format_reward": float(candidate is not None),
-                "verifiable_reward": verifiable_reward,
-                "relative_error": 1.0 - verifiable_reward,
-                "relative_error_clipped": 1.0 - verifiable_reward,
-                **metrics,
-            },
-        }
+        return self.generator_result(candidate, format_ok, float(format_ok and metrics["formula_l1_distance"] == 0.0))
 
     def adversarial_judge_prompt(self, question: str, candidate: str) -> str:
         return (

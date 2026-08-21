@@ -74,19 +74,7 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
         target = self.adversarial_target(example)
         parsed = self.adversarial_candidate_answer(completion)
         format_ok = parsed is not None
-        error = 1.0 if parsed is None else abs(parsed - target) / max(abs(target), 1)
-        verifiable_reward = float(format_ok and parsed == target)
-        return {
-            "candidate": "" if parsed is None else str(parsed),
-            "format_ok": format_ok,
-            "verifiable_reward": verifiable_reward,
-            "metrics": {
-                "format_reward": float(format_ok),
-                "verifiable_reward": verifiable_reward,
-                "relative_error": error,
-                "relative_error_clipped": min(error, 1.0),
-            },
-        }
+        return self.generator_result(parsed, format_ok, float(format_ok and parsed == target))
 
     def adversarial_judge_prompt(self, question: str, candidate: int | str) -> str:
         return (

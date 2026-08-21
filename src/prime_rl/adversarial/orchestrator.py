@@ -1,9 +1,7 @@
 import asyncio
-import math
 import time
 from dataclasses import dataclass
 from itertools import cycle
-from statistics import pstdev
 from typing import Any, Iterable
 
 import tomli_w
@@ -11,9 +9,13 @@ import verifiers as vf
 
 import prime_rl._compat  # noqa: F401
 import prime_rl.monitors as monitors
-from prime_rl.adversarial.rollout_utils import backfill_rollout_tokens, rollout_to_sample
 from prime_rl.adversarial.runtime_env import TrainEnv
-from prime_rl.adversarial.utils import get_model_completion_len, save_rollouts
+from prime_rl.adversarial.utils import (
+    backfill_rollout_tokens,
+    get_model_completion_len,
+    rollout_to_sample,
+    save_rollouts,
+)
 from prime_rl.configs.adversarial import AdversarialRLConfig, AdversarialRoleConfig
 from prime_rl.orchestrator.packing import BatchPacker
 from prime_rl.trainer.model import setup_tokenizer
@@ -70,195 +72,10 @@ def mean_rollout_metric(rollouts: list[vf.RolloutOutput], key: str) -> float | N
     return mean(values) if values else None
 
 
-def mean_optional_float(values: Iterable[float | None]) -> float:
-    present = [float(value) for value in values if value is not None]
-    return mean(present)
-
-
-def finite_rollout_metric(rollout: vf.RolloutOutput, key: str) -> float | None:
-    value = rollout.get("metrics", {}).get(key)
-    if value is None:
-        return None
-    value = float(value)
-    return value if math.isfinite(value) else None
-
-
-def paired_rollout_metrics(rollouts: list[vf.RolloutOutput], x_key: str, y_key: str) -> tuple[list[float], list[float]]:
-    xs: list[float] = []
-    ys: list[float] = []
-    for rollout in rollouts:
-        x_value = finite_rollout_metric(rollout, x_key)
-        y_value = finite_rollout_metric(rollout, y_key)
-        if x_value is None or y_value is None:
-            continue
-        xs.append(x_value)
-        ys.append(y_value)
-    return xs, ys
-
-
-def pearson_corr(xs: list[float], ys: list[float]) -> float | None:
-    if len(xs) < 2 or len(xs) != len(ys):
-        return None
-    x_mean = mean(xs)
-    y_mean = mean(ys)
-    x_centered = [x - x_mean for x in xs]
-    y_centered = [y - y_mean for y in ys]
-    x_norm = math.sqrt(sum(x * x for x in x_centered))
-    y_norm = math.sqrt(sum(y * y for y in y_centered))
-    if x_norm == 0.0 or y_norm == 0.0:
-        return None
-    return sum(x * y for x, y in zip(x_centered, y_centered)) / (x_norm * y_norm)
-
-
-def rank_values(values: list[float]) -> list[float]:
-    ranks = [0.0] * len(values)
-    indexed_values = sorted(enumerate(values), key=lambda item: item[1])
-    idx = 0
-    while idx < len(indexed_values):
-        next_idx = idx + 1
-        while next_idx < len(indexed_values) and indexed_values[next_idx][1] == indexed_values[idx][1]:
-            next_idx += 1
-        rank = (idx + next_idx - 1) / 2.0
-        for original_idx, _ in indexed_values[idx:next_idx]:
-            ranks[original_idx] = rank
-        idx = next_idx
-    return ranks
-
-
-def spearman_corr(xs: list[float], ys: list[float]) -> float | None:
-    if len(xs) < 2 or len(xs) != len(ys):
-        return None
-    return pearson_corr(rank_values(xs), rank_values(ys))
-
-
-def logit_probability(probability: float) -> float:
-    probability = min(max(probability, 1e-7), 1.0 - 1e-7)
-    return math.log(probability / (1.0 - probability))
-
-
 def judge_reward_from_probability(probability: float | None) -> float:
     if probability is None:
         return 0.0
     return probability
-
-
-def mean_judge_probability_where(
-    rollouts: list[vf.RolloutOutput],
-    predicate: Any,
-) -> float | None:
-    values = []
-    for rollout in rollouts:
-        if not predicate(rollout):
-            continue
-        value = finite_rollout_metric(rollout, "judge_reference_probability_proxy")
-        if value is not None:
-            values.append(value)
-    return mean(values) if values else None
-
-
-def add_optional_metric(log_values: dict[str, float], key: str, value: float | None) -> None:
-    if value is not None and math.isfinite(value):
-        log_values[key] = value
-
-
-def add_judge_alignment_diagnostics(log_values: dict[str, float], generator_rollouts: list[vf.RolloutOutput]) -> None:
-    probability_key = "judge_reference_probability_proxy"
-    diagnostic_targets = (
-        "relative_error",
-        "relative_error_clipped",
-        "verifiable_reward",
-        "format_reward",
-        "valid_formula",
-        "formula_l1_distance",
-        "formula_l1_normalized",
-        "formula_heavy_l1_distance",
-        "formula_heavy_l1_normalized",
-        "countdown_proxy_reward",
-        "countdown_gold_reward",
-        "countdown_reward_hacking_gap",
-        "countdown_target_error",
-        "countdown_target_error_clipped",
-        "countdown_test_unchanged",
-    )
-    for target_key in diagnostic_targets:
-        probabilities, targets = paired_rollout_metrics(generator_rollouts, probability_key, target_key)
-        if not probabilities:
-            continue
-        logits = [logit_probability(probability) for probability in probabilities]
-        add_optional_metric(
-            log_values,
-            f"adversarial/diagnostics/judge_probability_correlation/{target_key}",
-            pearson_corr(probabilities, targets),
-        )
-        add_optional_metric(
-            log_values,
-            f"adversarial/diagnostics/judge_logit_correlation/{target_key}",
-            pearson_corr(logits, targets),
-        )
-        add_optional_metric(
-            log_values,
-            f"adversarial/diagnostics/judge_probability_spearman/{target_key}",
-            spearman_corr(probabilities, targets),
-        )
-
-    exact_probability = mean_judge_probability_where(
-        generator_rollouts,
-        lambda rollout: finite_rollout_metric(rollout, "verifiable_reward") == 1.0,
-    )
-    inexact_probability = mean_judge_probability_where(
-        generator_rollouts,
-        lambda rollout: finite_rollout_metric(rollout, "verifiable_reward") == 0.0,
-    )
-    format_ok_probability = mean_judge_probability_where(
-        generator_rollouts,
-        lambda rollout: finite_rollout_metric(rollout, "format_reward") == 1.0,
-    )
-    format_bad_probability = mean_judge_probability_where(
-        generator_rollouts,
-        lambda rollout: finite_rollout_metric(rollout, "format_reward") == 0.0,
-    )
-    low_error_probability = mean_judge_probability_where(
-        generator_rollouts,
-        lambda rollout: (
-            (error := finite_rollout_metric(rollout, "relative_error_clipped")) is not None and error <= 0.01
-        ),
-    )
-    medium_error_probability = mean_judge_probability_where(
-        generator_rollouts,
-        lambda rollout: (
-            (error := finite_rollout_metric(rollout, "relative_error_clipped")) is not None and 0.01 < error <= 0.1
-        ),
-    )
-    high_error_probability = mean_judge_probability_where(
-        generator_rollouts,
-        lambda rollout: (
-            (error := finite_rollout_metric(rollout, "relative_error_clipped")) is not None and error > 0.1
-        ),
-    )
-
-    add_optional_metric(log_values, "adversarial/diagnostics/judge_probability_mean/exact", exact_probability)
-    add_optional_metric(log_values, "adversarial/diagnostics/judge_probability_mean/inexact", inexact_probability)
-    add_optional_metric(log_values, "adversarial/diagnostics/judge_probability_mean/format_ok", format_ok_probability)
-    add_optional_metric(log_values, "adversarial/diagnostics/judge_probability_mean/format_bad", format_bad_probability)
-    add_optional_metric(log_values, "adversarial/diagnostics/judge_probability_mean/error_le_0.01", low_error_probability)
-    add_optional_metric(
-        log_values,
-        "adversarial/diagnostics/judge_probability_mean/error_0.01_to_0.1",
-        medium_error_probability,
-    )
-    add_optional_metric(log_values, "adversarial/diagnostics/judge_probability_mean/error_gt_0.1", high_error_probability)
-    if exact_probability is not None and inexact_probability is not None:
-        log_values["adversarial/diagnostics/judge_probability_gap/exact_minus_inexact"] = (
-            exact_probability - inexact_probability
-        )
-    if format_ok_probability is not None and format_bad_probability is not None:
-        log_values["adversarial/diagnostics/judge_probability_gap/format_ok_minus_bad"] = (
-            format_ok_probability - format_bad_probability
-        )
-    if low_error_probability is not None and high_error_probability is not None:
-        log_values["adversarial/diagnostics/judge_probability_gap/low_error_minus_high_error"] = (
-            low_error_probability - high_error_probability
-        )
 
 
 def generator_result_reward(result: dict[str, Any]) -> float:
@@ -488,9 +305,6 @@ async def score_and_build_judge_batch(
         rollout.setdefault("metrics", {})
         metrics = dict(result["metrics"])
         metrics["judge_reference_probability_proxy"] = judge_reference_probability_proxy
-        metrics["judge_reference_logit_proxy"] = (
-            None if judge_reference_probability_proxy is None else logit_probability(judge_reference_probability_proxy)
-        )
         rollout["metrics"].update(metrics)
         generator_rewards.append(reward)
 
@@ -720,27 +534,9 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             )
             eval_log_values = {
                 "adversarial/eval/generator/reward": mean([float(rollout["reward"]) for rollout in eval_rollouts]),
-                "adversarial/eval/generator/rollouts": len(eval_rollouts),
+                "adversarial/eval/generator/verifiable_reward": mean_rollout_metric(eval_rollouts, "verifiable_reward")
+                or 0.0,
             }
-            for metric_name in (
-                "format_reward",
-                "verifiable_reward",
-                "relative_error",
-                "relative_error_clipped",
-                "countdown_proxy_reward",
-                "countdown_gold_reward",
-                "countdown_reward_hacking_gap",
-                "countdown_expr_present",
-                "countdown_uses_required_numbers",
-                "countdown_allowed_chars",
-                "countdown_target_error",
-                "countdown_target_error_clipped",
-                "countdown_test_unchanged",
-                "countdown_solution_changed",
-            ):
-                value = mean_rollout_metric(eval_rollouts, metric_name)
-                if value is not None:
-                    eval_log_values[f"adversarial/eval/generator/{metric_name}"] = value
             await monitors.log(eval_log_values, step=0)
             logger.success(
                 f"Step 0 eval | Eval reward: {eval_log_values['adversarial/eval/generator/reward']:.4f}"
@@ -766,43 +562,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 reward_mode=config.generator_reward_mode,
             )
 
-            generator_metrics = {
-                key: mean_rollout_metric(generator_rollouts, key)
-                for key in (
-                    "format_reward",
-                    "verifiable_reward",
-                    "relative_error",
-                    "relative_error_clipped",
-                    "valid_formula",
-                    "formula_l1_distance",
-                    "formula_heavy_l1_distance",
-                    "formula_l1_normalized",
-                    "formula_heavy_l1_normalized",
-                    "formula_target_atom_count",
-                    "formula_target_heavy_atom_count",
-                    "abstract_word_count",
-                    "abstract_reference_word_count",
-                    "abstract_word_count_error",
-                    "abstract_word_count_relative_error",
-                    "abstract_char_length",
-                    "abstract_reference_char_length",
-                    "abstract_char_length_error",
-                    "abstract_char_length_relative_error",
-                    "countdown_proxy_reward",
-                    "countdown_gold_reward",
-                    "countdown_reward_hacking_gap",
-                    "countdown_numbers_count",
-                    "countdown_expr_present",
-                    "countdown_uses_required_numbers",
-                    "countdown_allowed_chars",
-                    "countdown_target_error",
-                    "countdown_target_error_clipped",
-                    "countdown_test_unchanged",
-                    "countdown_solution_changed",
-                    "judge_reference_probability_proxy",
-                    "judge_reference_logit_proxy",
-                )
-            }
+            generator_verifiable_reward = mean_rollout_metric(generator_rollouts, "verifiable_reward") or 0.0
             judge_rewards = [float(r["reward"]) for r in scored.judge_rollouts]
             generated_judge_rollouts = [
                 r for r in scored.judge_rollouts if r.get("info", {}).get("kind") == "generated"
@@ -835,102 +595,25 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 update_tasks.append(wait_and_update(judge, judge.train_step + 1))
             await asyncio.gather(*update_tasks)
 
-            generated_reference_probability_proxies = [
-                judge.env.env.adversarial_reference_probability_proxy(r) for r in generated_judge_rollouts
-            ]
-            reference_reference_probability_proxies = [
-                judge.env.env.adversarial_reference_probability_proxy(r) for r in reference_judge_rollouts
-            ]
-            judge_proxy_losses = [
-                -math.log(max(1.0 - probability, 1e-7))
-                for probability in generated_reference_probability_proxies
-                if probability is not None
-            ] + [
-                -math.log(max(probability, 1e-7))
-                for probability in reference_reference_probability_proxies
-                if probability is not None
-            ]
-            judge_a_rate = mean(
-                [float(judge.env.env.adversarial_choice(r.get("completion")) == "A") for r in scored.judge_rollouts]
-            )
             generator_completion_lens = [float(get_model_completion_len(r)) for r in generator_rollouts]
             judge_completion_lens = [float(get_model_completion_len(r)) for r in scored.judge_rollouts]
             log_values = {
                 "adversarial/generator/reward": mean(scored.generator_rewards),
-                "adversarial/generator/reward_std": (
-                    pstdev(scored.generator_rewards) if scored.generator_rewards else 0.0
-                ),
-                "adversarial/generator/format_accuracy": generator_metrics["format_reward"] or 0.0,
-                "adversarial/generator/verifiable_reward": generator_metrics["verifiable_reward"] or 0.0,
-                "adversarial/generator/relative_error": generator_metrics["relative_error"] or 0.0,
-                "adversarial/generator/relative_error_clipped": generator_metrics["relative_error_clipped"] or 0.0,
-                "adversarial/generator/judge_reference_probability_proxy": (
-                    generator_metrics["judge_reference_probability_proxy"] or 0.0
-                ),
-                "adversarial/generator/judge_reference_logit_proxy": (
-                    generator_metrics["judge_reference_logit_proxy"] or 0.0
-                ),
+                "adversarial/generator/verifiable_reward": generator_verifiable_reward,
                 "adversarial/judge/accuracy": mean(judge_rewards),
                 "adversarial/judge/generated_accuracy": mean(generated_judge_rewards),
                 "adversarial/judge/reference_accuracy": mean(reference_judge_rewards),
-                "adversarial/judge/reference_probability_proxy/generated": mean_optional_float(
-                    generated_reference_probability_proxies
-                ),
-                "adversarial/judge/reference_probability_proxy/reference": mean_optional_float(
-                    reference_reference_probability_proxies
-                ),
-                "adversarial/judge/proxy_loss": mean(judge_proxy_losses),
-                "adversarial/judge/predicted_reference_rate": judge_a_rate,
                 "adversarial/generator/completion_tokens/mean": mean(generator_completion_lens),
                 "adversarial/generator/completion_tokens/min": min(generator_completion_lens, default=0.0),
                 "adversarial/generator/completion_tokens/max": max(generator_completion_lens, default=0.0),
                 "adversarial/judge/completion_tokens/mean": mean(judge_completion_lens),
                 "adversarial/judge/completion_tokens/min": min(judge_completion_lens, default=0.0),
                 "adversarial/judge/completion_tokens/max": max(judge_completion_lens, default=0.0),
-                "adversarial/generator/rollouts": len(generator_rollouts),
-                "adversarial/generator/trainer_step": generator.train_step,
-                "adversarial/judge/scored_rollouts": len(scored.judge_rollouts),
-                "adversarial/judge/train_rollouts": 0 if skip_judge_update else len(scored.judge_rollouts),
-                "adversarial/judge/trainer_step": judge.train_step,
                 "adversarial/judge/update_skipped": float(skip_judge_update),
-                "adversarial/judge/update_skipped_no_rollouts": float(not scored.judge_rollouts),
-                "adversarial/judge/update_skip_streak": judge_gate_state.skip_streak,
                 "adversarial/step_time_seconds": time.perf_counter() - step_start,
             }
             if judge_gate_state.accuracy_ema is not None:
                 log_values["adversarial/judge/accuracy_ema"] = judge_gate_state.accuracy_ema
-            optional_generator_metrics = {
-                "valid_formula": "adversarial/generator/valid_formula_rate",
-                "formula_l1_distance": "adversarial/generator/formula_l1_distance",
-                "formula_heavy_l1_distance": "adversarial/generator/formula_heavy_l1_distance",
-                "formula_l1_normalized": "adversarial/generator/formula_l1_normalized",
-                "formula_heavy_l1_normalized": "adversarial/generator/formula_heavy_l1_normalized",
-                "formula_target_atom_count": "adversarial/generator/formula_target_atom_count",
-                "formula_target_heavy_atom_count": "adversarial/generator/formula_target_heavy_atom_count",
-                "abstract_word_count": "adversarial/generator/abstract_word_count",
-                "abstract_reference_word_count": "adversarial/generator/abstract_reference_word_count",
-                "abstract_word_count_error": "adversarial/generator/abstract_word_count_error",
-                "abstract_word_count_relative_error": "adversarial/generator/abstract_word_count_relative_error",
-                "abstract_char_length": "adversarial/generator/abstract_char_length",
-                "abstract_reference_char_length": "adversarial/generator/abstract_reference_char_length",
-                "abstract_char_length_error": "adversarial/generator/abstract_char_length_error",
-                "abstract_char_length_relative_error": "adversarial/generator/abstract_char_length_relative_error",
-                "countdown_proxy_reward": "adversarial/generator/countdown_proxy_reward",
-                "countdown_gold_reward": "adversarial/generator/countdown_gold_reward",
-                "countdown_reward_hacking_gap": "adversarial/generator/countdown_reward_hacking_gap",
-                "countdown_numbers_count": "adversarial/generator/countdown_numbers_count",
-                "countdown_expr_present": "adversarial/generator/countdown_expr_present",
-                "countdown_uses_required_numbers": "adversarial/generator/countdown_uses_required_numbers",
-                "countdown_allowed_chars": "adversarial/generator/countdown_allowed_chars",
-                "countdown_target_error": "adversarial/generator/countdown_target_error",
-                "countdown_target_error_clipped": "adversarial/generator/countdown_target_error_clipped",
-                "countdown_test_unchanged": "adversarial/generator/countdown_test_unchanged",
-                "countdown_solution_changed": "adversarial/generator/countdown_solution_changed",
-            }
-            for metric_name, log_name in optional_generator_metrics.items():
-                value = generator_metrics.get(metric_name)
-                if value is not None:
-                    log_values[log_name] = value
             if eval_config is not None and (step + 1) % eval_config.interval == 0:
                 eval_rollouts = await run_generator_eval(
                     generator,
@@ -947,16 +630,9 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 log_values["adversarial/eval/generator/reward"] = mean(
                     [float(rollout["reward"]) for rollout in eval_rollouts]
                 )
-                log_values["adversarial/eval/generator/rollouts"] = len(eval_rollouts)
-                for metric_name in ("format_reward", "verifiable_reward", "relative_error", "relative_error_clipped"):
-                    value = mean_rollout_metric(eval_rollouts, metric_name)
-                    if value is not None:
-                        log_values[f"adversarial/eval/generator/{metric_name}"] = value
-                for metric_name, log_name in optional_generator_metrics.items():
-                    value = mean_rollout_metric(eval_rollouts, metric_name)
-                    if value is not None:
-                        log_values[log_name.replace("adversarial/generator/", "adversarial/eval/generator/")] = value
-            add_judge_alignment_diagnostics(log_values, generator_rollouts)
+                log_values["adversarial/eval/generator/verifiable_reward"] = (
+                    mean_rollout_metric(eval_rollouts, "verifiable_reward") or 0.0
+                )
             await monitors.log(log_values, step=step)
             logger.success(
                 f"Step {step} | Time: {time.perf_counter() - step_start:.2f}s | "

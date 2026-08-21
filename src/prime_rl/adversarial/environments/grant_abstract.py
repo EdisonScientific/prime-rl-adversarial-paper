@@ -207,29 +207,6 @@ def build_paper_abstract_dataset(
     return Dataset.from_list(rows)
 
 
-def abstract_distribution_metrics(candidate: str | None, reference: str) -> dict[str, float]:
-    reference_words = long_text_word_count(reference)
-    reference_chars = len(reference)
-    candidate_words = long_text_word_count(candidate or "")
-    candidate_chars = len(candidate or "")
-    word_error = abs(candidate_words - reference_words)
-    char_error = abs(candidate_chars - reference_chars)
-    word_relative_error = word_error / max(reference_words, 1)
-    char_relative_error = char_error / max(reference_chars, 1)
-    return {
-        "abstract_word_count": float(candidate_words),
-        "abstract_reference_word_count": float(reference_words),
-        "abstract_word_count_error": float(word_error),
-        "abstract_word_count_relative_error": word_relative_error,
-        "abstract_char_length": float(candidate_chars),
-        "abstract_reference_char_length": float(reference_chars),
-        "abstract_char_length_error": float(char_error),
-        "abstract_char_length_relative_error": char_relative_error,
-        "relative_error": word_relative_error,
-        "relative_error_clipped": min(word_relative_error, 1.0),
-    }
-
-
 class PaperAbstractGeneratorEnv(GeneratorEnv):
     """Paper-abstract generator env; the adversarial orchestrator assigns rewards."""
 
@@ -283,17 +260,8 @@ class PaperAbstractGeneratorEnv(GeneratorEnv):
         reference = self.adversarial_reference_answer(example)
         candidate = self.adversarial_candidate_answer(completion)
         format_ok = candidate is not None
-        verifiable_reward = float(format_ok and normalized_long_text_key(candidate or "") == normalized_long_text_key(reference))
-        return {
-            "candidate": "" if candidate is None else candidate,
-            "format_ok": format_ok,
-            "verifiable_reward": verifiable_reward,
-            "metrics": {
-                "format_reward": float(format_ok),
-                "verifiable_reward": verifiable_reward,
-                **abstract_distribution_metrics(candidate, reference),
-            },
-        }
+        verifiable = float(format_ok and normalized_long_text_key(candidate or "") == normalized_long_text_key(reference))
+        return self.generator_result(candidate, format_ok, verifiable)
 
     def adversarial_judge_prompt(self, question: str, candidate: str) -> str:
         return (
