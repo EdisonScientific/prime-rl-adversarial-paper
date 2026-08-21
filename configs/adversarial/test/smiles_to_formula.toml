@@ -1,24 +1,12 @@
-output_dir = "/data/users/albertbou/ibis_data/rl/adversarial-multiplication-4digit-judge-qwen3-0p6bgen-4bjudge-b64r8-max4096-skipinvalid-5k-20260713-1510"
-clean_output_dir = false
+output_dir = "outputs/adversarial-test-smiles-to-formula"
 generator_reward_mode = "judge"
 
-[log]
-level = "debug"
-
 [generator]
-max_steps = 5000
-seq_len = 8192
+max_steps = 20
+seq_len = 4096
 
 [generator.model]
 name = "Qwen/Qwen3-0.6B"
-
-[generator.wandb]
-project = "multiplication"
-entity = "edison-scientific"
-name = "adversarial-multiplication-4digit-judge-qwen3-0p6bgen-4bjudge-b64r8-max4096-skipinvalid-5k-20260713-1510"
-
-[generator.weight_broadcast]
-type = "filesystem"
 
 [generator.deployment]
 type = "single_node"
@@ -27,49 +15,34 @@ num_infer_gpus = 1
 num_train_gpus = 1
 
 [generator.orchestrator]
-batch_size = 64
-rollouts_per_example = 8
+batch_size = 32
+rollouts_per_example = 4
 
 [generator.orchestrator.client]
 base_url = ["http://localhost:8000/v1"]
 
 [generator.orchestrator.train.sampling]
 temperature = 1.0
-max_completion_tokens = 4096
+max_completion_tokens = 1024
 extra_body = { top_k = 20, min_p = 0.0, chat_template_kwargs = { enable_thinking = true } }
 
 [[generator.orchestrator.train.env]]
 id = "prime_rl.adversarial.envs"
 name = "adversarial_generator"
-args = { kind = "generator", task = "multiplication", n_digits = 4, num_examples = 5000, seed = 1 }
-
-[generator.trainer.loss]
-type = "default"
-kl_tau = 0.005
-
-[generator.trainer.optim]
-lr = 0.0000003
+args = { kind = "generator", task = "ether0_smiles_to_formula", num_examples = 256, seed = 1 }
 
 [generator.inference.server]
 port = 8000
 
 [generator.inference.model]
-max_model_len = 8192
+max_model_len = 4096
 
 [judge]
-max_steps = 5000
+max_steps = 20
 seq_len = 2048
 
 [judge.model]
-name = "Qwen/Qwen3-4B"
-
-[judge.wandb]
-project = "multiplication"
-entity = "edison-scientific"
-name = "adversarial-multiplication-4digit-judge-qwen3-0p6bgen-4bjudge-b64r8-max4096-skipinvalid-5k-20260713-1510"
-
-[judge.weight_broadcast]
-type = "filesystem"
+name = "Qwen/Qwen3-0.6B"
 
 [judge.deployment]
 type = "single_node"
@@ -78,7 +51,7 @@ num_infer_gpus = 1
 num_train_gpus = 1
 
 [judge.orchestrator]
-batch_size = 128
+batch_size = 64
 rollouts_per_example = 1
 
 [judge.orchestrator.client]
@@ -94,9 +67,6 @@ id = "prime_rl.adversarial.envs"
 name = "adversarial_judge"
 args = { kind = "judge" }
 
-[judge.trainer.optim]
-lr = 0.000001
-
 [judge.trainer.loss]
 type = "binary_classifier"
 positive_token = "A"
@@ -110,10 +80,3 @@ port = 8001
 
 [judge.inference.model]
 max_model_len = 2048
-
-[judge_update_gate]
-enabled = true
-accuracy_threshold = 0.8
-ema_decay = 0.95
-warmup_steps = 0
-max_skip_streak = 20
