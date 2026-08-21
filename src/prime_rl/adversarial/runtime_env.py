@@ -9,7 +9,7 @@ from verifiers.utils.serve_utils import get_free_port
 from prime_rl.configs.adversarial_orchestrator import EnvConfig, TrainEnvConfig
 from prime_rl.utils.logger import get_logger
 
-REQUIRED_STATE_COLUMNS = ["trajectory"]
+STATE_COLUMNS = ["trajectory"]
 
 
 class Env:
@@ -100,15 +100,6 @@ class Env:
         sampling_args["extra_body"] = extra_body
         return sampling_args
 
-    @property
-    def state_columns(self) -> list[str]:
-        """Required columns plus any extras configured on the env, deduped (required first)."""
-        merged: list[str] = []
-        for col in (*REQUIRED_STATE_COLUMNS, *self.config.state_columns):
-            if col not in merged:
-                merged.append(col)
-        return merged
-
     async def run_rollout(
         self,
         client: vf.ClientConfig,
@@ -123,7 +114,7 @@ class Env:
             model=model_name,
             sampling_args=self._sampling_args_with_salt(cache_salt),
             max_retries=self.config.max_retries,
-            state_columns=self.state_columns,
+            state_columns=STATE_COLUMNS,
             env_client=self.env_client,
         )
 
@@ -142,7 +133,7 @@ class Env:
             model=model_name,
             sampling_args=self._sampling_args_with_salt(cache_salt),
             max_retries=self.config.max_retries,
-            state_columns=self.state_columns,
+            state_columns=STATE_COLUMNS,
             env_client=self.env_client,
         )
 

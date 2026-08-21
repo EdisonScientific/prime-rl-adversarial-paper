@@ -25,6 +25,8 @@ class GeneratorEnv(vf.SingleTurnEnv):
         kwargs.setdefault("rubric", vf.Rubric(funcs=[self.placeholder_reward]))
         super().__init__(**kwargs)
 
+    # The plural ``completions`` signature marks this as a group reward func, which
+    # routes generator envs through ``Env.run_group`` (one call per GRPO group).
     async def placeholder_reward(self, completions, **kwargs) -> list[float]:
         return [0.0 for _ in completions]
 

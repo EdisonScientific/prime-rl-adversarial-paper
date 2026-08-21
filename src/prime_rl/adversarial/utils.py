@@ -16,7 +16,6 @@ STRICT_ANSWER_ONLY_RE = re.compile(r"\s*<answer>(.*?)</answer>\s*\Z", re.DOTALL 
 STRICT_THINK_ANSWER_RE = re.compile(r"\s*<think>(.*?)</think>\s*<answer>(.*?)</answer>\s*\Z", re.DOTALL | re.IGNORECASE)
 
 
-# Copied from Ibis, delete when moving the envs there.
 def to_text(completion: Any) -> str:
     if isinstance(completion, str):
         return completion
