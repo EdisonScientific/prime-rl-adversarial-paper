@@ -10,7 +10,6 @@ from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
 from prime_rl.adversarial.environments.multiplication import load_environment as load_multiplication
 from prime_rl.adversarial.environments.smiles_to_formula import load_environment as load_smiles_to_formula
 
-
 _GENERATOR_LOADERS = {
     "multiplication": load_multiplication,
     "countdown_code": load_countdown_code,

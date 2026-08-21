@@ -78,16 +78,7 @@ extra_body = { thinking_token_budget = 1536, chat_template_kwargs = { enable_thi
 [[generator.orchestrator.train.env]]
 id = "prime_rl.adversarial.envs"
 name = "adversarial_ether0_generator"
-args = { kind = "generator", task = "grant_abstract", dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_train_excl_eval128_seed1.jsonl", eval_dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_eval128_seed1.jsonl", num_examples = 50000, num_eval_examples = 128, seed = 1, answer_format = "tagged", min_abstract_words = 0, max_abstract_words = 1000000, max_abstract_chars = 1000000, min_abstract_sentences = 0, max_abstract_sentences = 1000000 }
-
-[generator.orchestrator.advantage]
-type = "default"
-
-[generator.orchestrator.advantage.length_penalty]
-type = "dapo_overlong"
-max_completion_tokens = 3500
-overlong_buffer_tokens = 1000
-penalty = 1.0
+args = { kind = "generator", task = "grant_abstract", dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_train_excl_eval128_seed1.jsonl", eval_dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_eval128_seed1.jsonl", num_examples = 50000, num_eval_examples = 128, seed = 1, min_abstract_words = 0, max_abstract_words = 1000000, max_abstract_chars = 1000000, min_abstract_sentences = 0, max_abstract_sentences = 1000000 }
 
 [generator.trainer.loss]
 type = "default"

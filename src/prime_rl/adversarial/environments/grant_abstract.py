@@ -9,7 +9,7 @@ from typing import Any
 import verifiers as vf
 from datasets import Dataset
 
-from prime_rl.adversarial.env_utils import extract_strict_answer_only_text, strip_think, to_text
+from prime_rl.adversarial.env_utils import extract_strict_answer_only_text
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
 
 TITLE_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?")
@@ -29,15 +29,6 @@ The abstract should be concrete, technically plausible, and credible to speciali
 Do not include titles, authors, journal names, dates, citations, markdown, generic
 placeholders, or multiple abstracts.
 Stop immediately after the closing answer tag.
-"""
-
-PAPER_ABSTRACT_RAW_GENERATOR_SYSTEM_PROMPT = """\
-You are writing a scientifically plausible research paper abstract.
-
-Write only one complete abstract. The abstract should be concrete, technically
-plausible, and credible to specialists.
-Do not include titles, authors, journal names, dates, citations, markdown,
-generic placeholders, or multiple abstracts.
 """
 
 def collapse_whitespace(text: str) -> str:
@@ -261,15 +252,8 @@ class PaperAbstractGeneratorEnv(vf.SingleTurnEnv):
         max_abstract_chars: int = 3_000,
         min_abstract_sentences: int = 3,
         max_abstract_sentences: int = 24,
-        answer_format: str = "tagged",
-        reward_mode: str = "placeholder",
         **_: Any,
     ):
-        if answer_format not in {"tagged", "raw"}:
-            raise ValueError("paper abstract answer_format must be tagged or raw.")
-        if reward_mode != "placeholder":
-            raise ValueError("paper abstract adversarial training expects reward_mode='placeholder'.")
-        self._answer_format = answer_format
         self._dataset_args = {
             "dataset_path": dataset_path,
             "domain": domain,
@@ -286,22 +270,12 @@ class PaperAbstractGeneratorEnv(vf.SingleTurnEnv):
         }
         super().__init__(
             dataset=build_paper_abstract_dataset(**self._dataset_args),
-            system_prompt=self._build_system_prompt(answer_format),
+            system_prompt=PAPER_ABSTRACT_GENERATOR_SYSTEM_PROMPT,
             rubric=vf.Rubric(funcs=[self.placeholder_reward]),
-        )
-
-    def _build_system_prompt(self, answer_format: str) -> str:
-        return (
-            PAPER_ABSTRACT_GENERATOR_SYSTEM_PROMPT
-            if answer_format == "tagged"
-            else PAPER_ABSTRACT_RAW_GENERATOR_SYSTEM_PROMPT
         )
 
     async def placeholder_reward(self, completions, **kwargs) -> list[float]:
         return [0.0 for _ in completions]
-
-    async def format_reward(self, completion, **kwargs) -> float:
-        return float(self.adversarial_candidate_answer(completion) is not None)
 
     def adversarial_question(self, example: dict[str, Any]) -> str:
         info = example.get("info") or {}
@@ -312,11 +286,7 @@ class PaperAbstractGeneratorEnv(vf.SingleTurnEnv):
         return str(info.get("reference") or example["answer"])
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
-        answer = (
-            strip_think(to_text(completion)).strip()
-            if self._answer_format == "raw"
-            else extract_strict_answer_only_text(completion)
-        )
+        answer = extract_strict_answer_only_text(completion)
         if answer is None:
             return None
         abstract = collapse_whitespace(answer).strip().strip('"').strip("'")

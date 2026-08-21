@@ -11,11 +11,14 @@ import verifiers as vf
 
 import prime_rl._compat  # noqa: F401
 import prime_rl.monitors as monitors
-from prime_rl.configs.adversarial import AdversarialRLConfig, AdversarialRoleConfig
-from prime_rl.adversarial.advantage import compute_advantages
-from prime_rl.adversarial.runtime_env import TrainEnv
-from prime_rl.adversarial.orchestrator_utils import get_model_completion_len, save_rollouts, setup_student_inference_pool
+from prime_rl.adversarial.orchestrator_utils import (
+    get_model_completion_len,
+    save_rollouts,
+    setup_student_inference_pool,
+)
 from prime_rl.adversarial.rollout_utils import backfill_rollout_tokens, interleave_rollout
+from prime_rl.adversarial.runtime_env import TrainEnv
+from prime_rl.configs.adversarial import AdversarialRLConfig, AdversarialRoleConfig
 from prime_rl.orchestrator.packing import BatchPacker
 from prime_rl.trainer.model import setup_tokenizer
 from prime_rl.transport import TrainingSample, setup_micro_batch_sender
@@ -261,9 +264,7 @@ def add_judge_alignment_diagnostics(log_values: dict[str, float], generator_roll
         )
 
 
-def generator_result_reward(result: dict[str, Any], reward_mode: str) -> float:
-    if reward_mode == "exact_only":
-        return float(result["verifiable_reward"])
+def generator_result_reward(result: dict[str, Any]) -> float:
     return float(result["verifiable_reward"])
 
 
@@ -326,7 +327,7 @@ def require_config(config: AdversarialRLConfig) -> None:
 async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
     logger = setup_logger(config.log.level or "info", json_logging=config.log.json_logging)
     orch = config.orchestrator
-    env = TrainEnv(orch.train.env[0], max_seq_len=orch.seq_len)
+    env = TrainEnv(orch.train.env[0])
     await env.start(
         log_dir=get_log_dir(config.output_dir) / "envs" / "train",
         log_level=orch.log.vf_level,
@@ -398,7 +399,6 @@ async def run_generator_eval(
     *,
     step: int,
     group_size: int,
-    reward_mode: str,
 ) -> list[vf.RolloutOutput]:
     generator_groups = await asyncio.gather(
         *(
@@ -410,7 +410,7 @@ async def run_generator_eval(
     for example, rollouts in zip(examples, generator_groups):
         for rollout in rollouts:
             result = generator.env.env.adversarial_generator_result(rollout.get("completion"), example)
-            rollout["reward"] = generator_result_reward(result, reward_mode)
+            rollout["reward"] = generator_result_reward(result)
             rollout.setdefault("metrics", {}).update(result["metrics"])
             rollout.setdefault("info", {})
             rollout["info"]["kind"] = "eval_generated"
@@ -554,15 +554,7 @@ async def rollouts_to_samples(runtime: RoleRuntime, rollouts: list[vf.RolloutOut
     needs_backfill = any(step["tokens"] is None for rollout in rollouts for step in rollout["trajectory"])
     if needs_backfill:
         await asyncio.gather(
-            *(
-                asyncio.to_thread(
-                    backfill_rollout_tokens,
-                    rollout,
-                    runtime.tokenizer,
-                    renderer=runtime.renderer,
-                )
-                for rollout in rollouts
-            )
+            *(asyncio.to_thread(backfill_rollout_tokens, rollout, runtime.renderer) for rollout in rollouts)
         )
     train_examples: list[TrainingSample] = []
     temperature = float(runtime.env.sampling_args.get("temperature", 1.0) or 1.0)
@@ -603,12 +595,12 @@ async def send_role_batch(runtime: RoleRuntime, rollouts: list[vf.RolloutOutput]
         for rollout in rollouts:
             rollout["advantage"] = 0.0
     else:
+        # Plain GRPO: reward minus the group-mean baseline.
         for start in range(0, len(rollouts), group_size):
-            compute_advantages(
-                rollouts[start : start + group_size],
-                runtime.config.orchestrator.advantage,
-                max_seq_len=runtime.config.orchestrator.seq_len,
-            )
+            group = rollouts[start : start + group_size]
+            baseline = sum(float(r["reward"]) for r in group) / len(group)
+            for rollout in group:
+                rollout["advantage"] = float(rollout["reward"]) - baseline
     examples = await rollouts_to_samples(runtime, rollouts)
     if not examples:
         raise RuntimeError(f"{runtime.name} produced no trainable examples at step {step}")
@@ -629,10 +621,6 @@ async def wait_and_update(runtime: RoleRuntime, next_step: int) -> None:
     await runtime.inference_pool.update_weights(weights_path, step=next_step)
     runtime.ckpt_step = next_step
     runtime.train_step = next_step
-
-
-async def initialize_from_resume(runtime: RoleRuntime, resume_step: int) -> None:
-    await wait_and_update(runtime, resume_step)
 
 
 def should_skip_judge_update(config: AdversarialRLConfig, state: JudgeUpdateGateState, step: int, accuracy: float) -> bool:
@@ -678,8 +666,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
         if start_step:
             logger.info(f"Resuming generator and judge inference from step {start_step}")
             await asyncio.gather(
-                initialize_from_resume(generator, start_step),
-                initialize_from_resume(judge, start_step),
+                wait_and_update(generator, start_step),
+                wait_and_update(judge, start_step),
             )
         examples = list(generator.env.get_dataset(seed=config.generator.orchestrator.buffer.seed))
         if not examples:
@@ -710,7 +698,6 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 eval_examples,
                 step=0,
                 group_size=eval_config.group_size,
-                reward_mode=config.generator_reward_mode,
             )
             eval_step_path = get_step_path(get_rollout_dir(config.output_dir), 0)
             await asyncio.to_thread(
@@ -938,7 +925,6 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                     eval_examples,
                     step=step + 1,
                     group_size=eval_config.group_size,
-                    reward_mode=config.generator_reward_mode,
                 )
                 await asyncio.to_thread(
                     save_rollouts,

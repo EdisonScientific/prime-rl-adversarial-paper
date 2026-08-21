@@ -1,22 +1,12 @@
-import base64
-import hashlib
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pybase64
 import torch
 import verifiers as vf
-from transformers.tokenization_utils import PreTrainedTokenizer
 
 from prime_rl.transport import RoutedExperts, TrainingSample
-from prime_rl.utils.chat_template import (
-    common_prefix_len,
-    deserialize_tool_calls,
-    normalize_messages,
-    render_messages,
-    strip_message_content,
-)
+from prime_rl.utils.chat_template import deserialize_tool_calls, normalize_messages
 from prime_rl.utils.logger import get_logger
 
 # We use list() instead of deepcopy() for flat lists (token IDs, logprobs) - safe because
@@ -45,84 +35,11 @@ def align_routed_experts(
     return np.concatenate((routed_experts, padding), axis=0)
 
 
-def _common_prefix_len(a: list[int], b: list[int]) -> int:
-    return common_prefix_len(a, b)
-
-
-def _normalize_messages(messages: Any, default_role: str) -> list[dict[str, Any]]:
-    return normalize_messages(messages, default_role)
-
-
-def _deserialize_tool_calls(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return deserialize_tool_calls(messages)
-
-
 def _strip_message_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return strip_message_content(messages)
-
-
-def _render_messages(
-    tokenizer: PreTrainedTokenizer,
-    messages: list[dict[str, Any]],
-    add_generation_prompt: bool = False,
-    tools: list[dict[str, Any]] | None = None,
-) -> list[int]:
-    return render_messages(
-        tokenizer,
-        messages,
-        add_generation_prompt=add_generation_prompt,
-        tools=tools,
-    )
-
-
-def _tokenize_step_from_messages(
-    step: vf.TrajectoryStep,
-    tokenizer: PreTrainedTokenizer,
-    tools: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    prompt = _normalize_messages(step.get("prompt"), default_role="user")
-    completion = _normalize_messages(step.get("completion"), default_role="assistant")
-
-    prompt = _strip_message_content(_deserialize_tool_calls(prompt))
-    completion = _strip_message_content(_deserialize_tool_calls(completion))
-
-    assert all(m.get("role") == "assistant" for m in completion), (
-        "Expected all completion messages to be assistant role for SFT distillation, "
-        f"got roles: {[m.get('role') for m in completion]}"
-    )
-
-    all_messages = prompt + completion
-    prompt_has_assistant_completion = len(completion) > 0 and completion[0].get("role") == "assistant"
-    prompt_ids = _render_messages(
-        tokenizer,
-        prompt,
-        add_generation_prompt=prompt_has_assistant_completion,
-        tools=tools,
-    )
-    full_ids = _render_messages(
-        tokenizer,
-        all_messages,
-        tools=tools,
-    )
-
-    split_idx = _common_prefix_len(prompt_ids, full_ids)
-    original_prompt_len = len(prompt_ids)
-
-    prompt_ids = full_ids[:split_idx]
-    completion_ids = full_ids[split_idx:]
-    completion_mask = [True] * len(completion_ids)
-    completion_logprobs = [0.0] * len(completion_ids)
-
-    return {
-        "prompt_ids": prompt_ids,
-        "prompt_mask": [False] * len(prompt_ids),
-        "completion_ids": completion_ids,
-        "completion_mask": completion_mask,
-        "completion_logprobs": completion_logprobs,
-        "routed_experts": None,
-        "prompt_prefix_len": split_idx,
-        "original_prompt_len": original_prompt_len,
-    }
+    return [
+        {**message, "content": message["content"].strip()} if isinstance(message.get("content"), str) else message
+        for message in messages
+    ]
 
 
 def _convert_tools_to_oai_format(tool_defs: list) -> list[dict[str, Any]] | None:
@@ -157,48 +74,19 @@ def _tokenize_step_with_renderer(
     """Tokenize a trajectory step using a Renderer."""
     from renderers.base import build_trajectory_step
 
-    prompt = _normalize_messages(step.get("prompt"), default_role="user")
-    completion = _normalize_messages(step.get("completion"), default_role="assistant")
-    prompt = _strip_message_content(_deserialize_tool_calls(prompt))
-    completion = _strip_message_content(_deserialize_tool_calls(completion))
+    prompt = normalize_messages(step.get("prompt"), default_role="user")
+    completion = normalize_messages(step.get("completion"), default_role="assistant")
+    prompt = _strip_message_content(deserialize_tool_calls(prompt))
+    completion = _strip_message_content(deserialize_tool_calls(completion))
     return build_trajectory_step(renderer, prompt, completion, tools=tools)
 
 
-def backfill_rollout_tokens(
-    output: vf.RolloutOutput,
-    tokenizer: PreTrainedTokenizer,
-    renderer=None,
-) -> bool:
-    """Populate missing step tokens from prompt/completion messages.
-
-    When a renderer is provided, uses it for tokenization (faster, deterministic).
-    Otherwise falls back to the tokenizer + apply_chat_template path.
-    """
-    if all(step["tokens"] is not None for step in output["trajectory"]):
-        return True
-
-    logger = get_logger()
+def backfill_rollout_tokens(output: vf.RolloutOutput, renderer) -> None:
+    """Populate missing step tokens from prompt/completion messages via the renderer."""
     tools = _convert_tools_to_oai_format(output.get("tool_defs", []))
-
-    for step_idx, step in enumerate(output["trajectory"]):
-        if step["tokens"] is not None:
-            continue
-
-        if renderer is not None:
+    for step in output["trajectory"]:
+        if step["tokens"] is None:
             step["tokens"] = _tokenize_step_with_renderer(step, renderer, tools=tools)
-        else:
-            reconstructed = _tokenize_step_from_messages(step, tokenizer, tools=tools)
-            if reconstructed["prompt_prefix_len"] < reconstructed["original_prompt_len"]:
-                logger.debug(
-                    f"Prompt tokenization was non-prefix for example {output['example_id']} step {step_idx}. "
-                    f"Using longest common prefix length {reconstructed['prompt_prefix_len']} "
-                    f"(original prompt had {reconstructed['original_prompt_len']} tokens)."
-                )
-            reconstructed.pop("prompt_prefix_len")
-            reconstructed.pop("original_prompt_len")
-            step["tokens"] = reconstructed
-
-    return True
 
 
 def interleave_rollout(
@@ -604,48 +492,3 @@ def _pack_mm_kwargs_from_renderer(mm_data: Any) -> "dict[str, Any] | None":
             data=arr.tobytes(),
         )
     return out
-
-
-_FILE_URL_PREFIX = "file://"
-
-
-def offload_images_to_disk(rollouts: list[vf.RolloutOutput], output_dir: Path) -> int:
-    """Replace base64 image data in rollout trajectories with file paths on disk.
-
-    Scans all trajectory step prompts for data:image URLs, writes the decoded
-    image bytes to ``{output_dir}/assets/images/{hash}.png``, and replaces the
-    URL in-place with ``file://{path}``.  Deduplicates by content hash so each
-    unique image is written only once.
-
-    Returns the number of unique images written to disk.
-    """
-    images_dir = output_dir / "assets" / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-
-    written: set[str] = set()
-
-    for output in rollouts:
-        for step in output.get("trajectory", []):
-            prompt = step.get("prompt")
-            if not prompt or not isinstance(prompt, list):
-                continue
-            for msg in prompt:
-                content = msg.get("content", [])
-                if not isinstance(content, list):
-                    continue
-                for item in content:
-                    if item.get("type") != "image_url":
-                        continue
-                    url = item.get("image_url", {}).get("url", "")
-                    if not url.startswith("data:image"):
-                        continue
-                    b64_data = url.split(",", 1)[1]
-                    content_hash = hashlib.sha256(b64_data.encode()).hexdigest()[:16]
-                    path = images_dir / f"{content_hash}.png"
-                    if content_hash not in written:
-                        if not path.exists():
-                            path.write_bytes(base64.b64decode(b64_data))
-                        written.add(content_hash)
-                    item["image_url"]["url"] = f"{_FILE_URL_PREFIX}{path}"
-
-    return len(written)

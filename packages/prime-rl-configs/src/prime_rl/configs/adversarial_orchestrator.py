@@ -3,8 +3,7 @@ import warnings
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import AliasChoices, Field, model_serializer, model_validator
-from pydantic_core.core_schema import SerializerFunctionWrapHandler
+from pydantic import AliasChoices, Field, model_validator
 from renderers import AutoRendererConfig, RendererConfig
 
 from prime_rl.configs.monitors import PrimeMonitorConfig, WandbMonitorConfig
@@ -157,58 +156,6 @@ class EvalSamplingConfig(BaseConfig):
         return data
 
 
-class LinearLengthPenaltyConfig(BaseConfig):
-    type: Literal["linear"] = "linear"
-
-    coef: float = Field(0.25, ge=0, allow_inf_nan=False)
-    """Scale on the linear length penalty. Each reward is reduced by ``coef * pass_rate * (model completion tokens / orchestrator.seq_len)`` — where ``pass_rate`` is the group's mean reward — before the GRPO baseline subtraction. Finite and non-negative."""
-
-    gate_by_correctness: bool = False
-    """When True, scale each rollout's penalty by its reward (``penalty * reward``), so correct rollouts (``reward == 1``) are penalized and incorrect ones (``reward == 0``) are not. When False, every rollout is penalized equally."""
-
-
-class DAPOOverlongLengthPenaltyConfig(BaseConfig):
-    type: Literal["dapo_overlong"] = "dapo_overlong"
-
-    max_completion_tokens: int = Field(..., ge=1)
-    """Completion-token budget at which the full overlong penalty is reached."""
-
-    overlong_buffer_tokens: int = Field(..., ge=1)
-    """Linear buffer before ``max_completion_tokens`` where the penalty ramps from 0 to ``penalty``."""
-
-    penalty: float = Field(1.0, ge=0, allow_inf_nan=False)
-    """Maximum reward penalty applied to rollouts at or beyond ``max_completion_tokens``."""
-
-
-LengthPenaltyConfig: TypeAlias = LinearLengthPenaltyConfig | DAPOOverlongLengthPenaltyConfig
-
-
-class DefaultAdvantageConfig(BaseConfig):
-    type: Literal["default"] = "default"
-
-    length_penalty: LengthPenaltyConfig | None = None
-    """Length penalty applied during advantage computation. Subtracts a ``coef * pass_rate * (completion tokens / orchestrator.seq_len)`` term from each reward (``pass_rate`` = group mean reward) before the baseline subtraction, so solved-often problems get the strongest concision pressure and never-solved groups get none. None disables the penalty."""
-
-    length_weighted_baseline: bool = False
-    """When True, the GRPO baseline is the token-length-weighted mean reward (``sum(len_i * reward_i) / sum(len_i)``) instead of the plain group mean, centering advantages by per-token expected reward."""
-
-
-class CustomAdvantageConfig(BaseConfig):
-    type: Literal["custom"] = "custom"
-
-    import_path: str
-    """Import path to the advantage function (e.g. ``my_module.my_advantage``)."""
-
-    kwargs: dict[str, Any] = Field(default_factory=dict)
-    """Kwargs forwarded to the advantage function."""
-
-
-AdvantageConfig: TypeAlias = Annotated[
-    DefaultAdvantageConfig | CustomAdvantageConfig,
-    Field(discriminator="type"),
-]
-
-
 class EnvConfig(BaseConfig):
     id: str = "reverse-text"
     """Registered verifiers environment ID (e.g. ``math-env``, ``primeintellect/math-env``). May include an ``@version`` suffix for installation."""
@@ -279,11 +226,6 @@ class TrainEnvConfig(EnvConfig):
     group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
     """Rollouts generated per example for GRPO group-relative advantages.
     Inherits from ``orchestrator.group_size`` when unset."""
-
-    advantage: AdvantageConfig | None = None
-    """Advantage strategy for this env's GRPO groups. Inherits from the top-level
-    ``orchestrator.advantage`` when unset; set a different ``default``/``custom``
-    config to give this env its own advantage computation."""
 
 
 class EvalEnvConfig(EnvConfig):
@@ -635,30 +577,16 @@ class OrchestratorConfig(BaseConfig):
 
     tokenizer: TokenizerConfig = TokenizerConfig()
 
-    renderer: RendererConfig | None = AutoRendererConfig()
+    renderer: RendererConfig = AutoRendererConfig()
     """Typed renderer config (``renderers.RendererConfig`` discriminated
-    union). Defaults to ``"auto"``, which resolves from
-    ``tokenizer.name_or_path`` via ``MODEL_RENDERER_MAP``. ``None``
-    opts into MITO (``openai_chat_completions``)."""
+    union), required — rollouts are tokenized through the renderer. Defaults
+    to ``"auto"``, which resolves from ``tokenizer.name_or_path`` via
+    ``MODEL_RENDERER_MAP``."""
 
     pool_size: int | None = Field(None, ge=1)
     """Number of renderer slots shared across concurrent rollouts. Bump
     for long multi-turn prompts where client-side jinja tokenization
-    serializes. Only meaningful when ``renderer`` is not ``None``."""
-
-    @model_serializer(mode="wrap")
-    def _preserve_mito_renderer(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """Emit ``renderer = "None"`` (string) when MITO so
-        ``model_dump(exclude_none=True)`` round-trips: dumped TOML has
-        ``renderer = "None"``, and on reload
-        ``BaseConfig._none_str_to_none`` coerces it back to ``None``.
-        Without this, a MITO orchestrator config saved to
-        ``control/orch.toml`` would lose the renderer key entirely and
-        reload as the default ``AutoRendererConfig()`` (TITO)."""
-        result = handler(self)
-        if self.renderer is None:
-            result["renderer"] = "None"
-        return result
+    serializes."""
 
     optim: OptimizerConfig = OptimizerConfig()
     """Per-run optimizer configuration for multi-run training."""
@@ -667,8 +595,6 @@ class OrchestratorConfig(BaseConfig):
     """Evaluation configuration."""
 
     pedagogy: PedagogyConfig = PedagogyConfig()
-
-    advantage: AdvantageConfig | None = DefaultAdvantageConfig()
 
     pre_batch_filters: list[FilterConfig] = [
         GibberishFilterConfig(enforce=False),
@@ -905,34 +831,6 @@ class OrchestratorConfig(BaseConfig):
         return self
 
     @model_validator(mode="after")
-    def validate_pool_size(self):
-        """``pool_size`` is only meaningful when the renderer is enabled
-        (``renderer is not None``). Reject otherwise so callers don't
-        silently pass it and wonder why it's ignored."""
-        if self.renderer is None and self.pool_size is not None:
-            raise ValueError(
-                f"orchestrator.pool_size={self.pool_size!r} is set but "
-                "orchestrator.renderer is None (MITO mode). Either configure a renderer "
-                "or remove pool_size."
-            )
-        return self
-
-    @model_validator(mode="after")
-    def vlm_requires_renderer(self):
-        """VLMs (``[model.vlm]`` block set) must go through the renderer.
-
-        The renderer owns the processor per-slot, produces byte-identical
-        tokens, and ships generic ``mm_kwargs`` keyed by whatever the
-        model's forward signature expects.
-        """
-        if self.student.model.vlm is not None and self.renderer is None:
-            raise ValueError(
-                "orchestrator.renderer must be set when model.vlm is set. "
-                "VLMs must go through a renderer (e.g. Qwen3VLRenderer) that owns the processor."
-            )
-        return self
-
-    @model_validator(mode="after")
     def validate_renderer_auto_resolves(self):
         """Reject the silent DefaultRenderer fallback at config time.
 
@@ -945,7 +843,7 @@ class OrchestratorConfig(BaseConfig):
         ``DefaultRendererConfig.tool_parser`` is configured. Surface at
         config time so ``--dry-run`` reports the error.
         """
-        if self.renderer is None or self.renderer.name != "auto":
+        if self.renderer.name != "auto":
             return self
         from renderers.base import MODEL_RENDERER_MAP
 
@@ -963,9 +861,7 @@ class OrchestratorConfig(BaseConfig):
             f"(b) [orchestrator.renderer] name=<model-specific renderer> — "
             f"if {model_id!r} is template-identical to a mapped family "
             f"(and ideally also add it upstream to "
-            f"renderers.base.MODEL_RENDERER_MAP). "
-            f"(c) orchestrator.renderer='none' — opt out of the renderer "
-            f"client entirely (MITO)."
+            f"renderers.base.MODEL_RENDERER_MAP)."
         )
 
     @model_validator(mode="after")
@@ -1007,11 +903,6 @@ class OrchestratorConfig(BaseConfig):
         for env_cfg in self.train.env:
             if "group_size" not in env_cfg.model_fields_set:
                 env_cfg.group_size = self.group_size
-
-        # Propagate the top-level ``advantage`` into each train env that didn't set its own.
-        for env_cfg in self.train.env:
-            if "advantage" not in env_cfg.model_fields_set:
-                env_cfg.advantage = self.advantage
 
         # Resolve train env num_workers from max_inflight_rollouts
         for env_cfg in self.train.env:

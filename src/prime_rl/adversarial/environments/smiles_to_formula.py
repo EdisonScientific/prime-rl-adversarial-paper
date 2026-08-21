@@ -224,7 +224,6 @@ class Ether0SmilesToFormulaGeneratorEnv(vf.SingleTurnEnv):
         num_eval_examples: int | None = None,
         holdout_eval_from_train: bool = False,
         seed: int = 0,
-        reward_mode: str = "placeholder",
         formula_l1_hint: bool = True,
         **_: Any,
     ):
@@ -252,20 +251,12 @@ class Ether0SmilesToFormulaGeneratorEnv(vf.SingleTurnEnv):
             else None
         )
         self._formula_l1_hint = formula_l1_hint
-        if reward_mode == "placeholder":
-            funcs = [self.placeholder_reward]
-            weights = None
-        elif reward_mode == "exact":
-            funcs = [self.verifiable_reward, self.format_reward]
-            weights = [1.0, 0.0]
-        else:
-            raise ValueError("Ether0 smiles-to-formula reward_mode must be 'placeholder' or 'exact'.")
         dataset, eval_dataset = self._build_datasets()
         super().__init__(
             dataset=dataset,
             eval_dataset=eval_dataset,
             system_prompt=self._build_system_prompt(),
-            rubric=vf.Rubric(funcs=funcs, weights=weights),
+            rubric=vf.Rubric(funcs=[self.placeholder_reward]),
         )
 
     def _build_datasets(self) -> tuple[Dataset, Dataset | None]:
@@ -301,16 +292,6 @@ class Ether0SmilesToFormulaGeneratorEnv(vf.SingleTurnEnv):
 
     async def placeholder_reward(self, completions, **kwargs) -> list[float]:
         return [0.0 for _ in completions]
-
-    async def verifiable_reward(self, completion, info, **kwargs) -> float:
-        candidate = self.adversarial_candidate_answer(completion)
-        if candidate is None:
-            return 0.0
-        metrics = ether0_formula_answer_metrics(candidate, info["solution"])
-        return float(metrics["formula_l1_distance"] == 0.0)
-
-    async def format_reward(self, completion, **kwargs) -> float:
-        return float(self.adversarial_candidate_answer(completion) is not None)
 
     def adversarial_question(self, example: dict[str, Any]) -> str:
         info = example.get("info") or {}
