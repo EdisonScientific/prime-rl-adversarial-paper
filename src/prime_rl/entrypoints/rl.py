@@ -46,6 +46,9 @@ TRAINER_CONFIG = "trainer.json"
 ORCHESTRATOR_CONFIG = "orchestrator.json"
 INFERENCE_CONFIG = "inference.json"
 
+# Launcher-only inference fields that are not needed by the vLLM server
+INFERENCE_CONFIG_EXCLUDE = {"deployment", "slurm", "output_dir", "dry_run"}
+
 ENVS_DIR = "envs"
 
 
@@ -95,9 +98,7 @@ def write_subconfigs(config: RLConfig, output_dir: Path) -> None:
         json.dump(dump_resolved_config(config.orchestrator), f, indent=2)
 
     if config.inference is not None:
-        # Exclude launcher-only fields that are not needed by the vLLM server
-        exclude_inference = {"deployment", "slurm", "output_dir", "dry_run"}
-        inference_dict = dump_resolved_config(config.inference, exclude=exclude_inference)
+        inference_dict = dump_resolved_config(config.inference, exclude=INFERENCE_CONFIG_EXCLUDE)
         if config.deployment.type == "multi_node":
             # Per-rank processes run bare engines; the sbatch starts the single global router.
             inference_dict["router"] = None

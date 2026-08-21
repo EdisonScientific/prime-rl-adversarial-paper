@@ -18,6 +18,7 @@ import prime_rl._compat  # noqa: F401
 from prime_rl.configs.adversarial import AdversarialRLConfig
 from prime_rl.entrypoints.rl import (
     INFERENCE_CONFIG,
+    INFERENCE_CONFIG_EXCLUDE,
     TRAINER_CONFIG,
     get_physical_gpu_ids,
 )
@@ -80,7 +81,6 @@ def allocate_gpus(config: AdversarialRLConfig) -> dict[str, dict[str, Any]]:
                 trainer_gpus = visible[num_infer_gpus:required_gpus]
             out[role] = {
                 "inference_node": inference_node,
-                "trainer_node": trainer_nodes[0],
                 "trainer_nodes": trainer_nodes,
                 "inference": inference_gpus,
                 "trainer": trainer_gpus,
@@ -104,13 +104,13 @@ def allocate_gpus(config: AdversarialRLConfig) -> dict[str, dict[str, Any]]:
         return {
             GENERATOR: {
                 "inference_node": nodes[0],
-                "trainer_node": nodes[0],
+                "trainer_nodes": [nodes[0]],
                 "inference": visible[: counts[GENERATOR]["inference"]],
                 "trainer": visible[counts[GENERATOR]["inference"] : generator_required],
             },
             JUDGE: {
                 "inference_node": nodes[1],
-                "trainer_node": nodes[1],
+                "trainer_nodes": [nodes[1]],
                 "inference": visible[: counts[JUDGE]["inference"]],
                 "trainer": visible[counts[JUDGE]["inference"] : judge_required],
             },
@@ -132,7 +132,7 @@ def allocate_gpus(config: AdversarialRLConfig) -> dict[str, dict[str, Any]]:
         cursor += infer_count
         train = visible[cursor : cursor + train_count]
         cursor += train_count
-        out[role] = {"inference_node": None, "trainer_node": None, "inference": infer, "trainer": train}
+        out[role] = {"inference_node": None, "trainer_nodes": [], "inference": infer, "trainer": train}
     return out
 
 
@@ -143,11 +143,10 @@ def apply_role_hosts(config: AdversarialRLConfig, allocation: dict[str, dict[str
             host = inference_node or "localhost"
             run.orchestrator.student.client.base_url = f"http://{host}:{run.inference.server.port}/v1"
 
-        trainer_nodes = allocation[role].get("trainer_nodes") or [allocation[role]["trainer_node"]]
-        trainer_node = trainer_nodes[0]
+        trainer_nodes = allocation[role]["trainer_nodes"]
         if run.trainer.weight_broadcast.type == "nccl":
             run.trainer.weight_broadcast.host = "0.0.0.0"
-            run.orchestrator.weight_broadcast.host = trainer_node
+            run.orchestrator.weight_broadcast.host = trainer_nodes[0] if trainer_nodes else "localhost"
 
 
 def write_configs(config: AdversarialRLConfig, config_dir: Path) -> None:
@@ -162,9 +161,8 @@ def write_configs(config: AdversarialRLConfig, config_dir: Path) -> None:
         with open(role_dir / TRAINER_CONFIG, "w") as f:
             json.dump(dump_resolved_config(role_config.trainer), f, indent=2)
         if role_config.inference is not None:
-            exclude_inference = {"deployment", "slurm", "output_dir", "dry_run"}
             with open(role_dir / INFERENCE_CONFIG, "w") as f:
-                json.dump(dump_resolved_config(role_config.inference, exclude=exclude_inference), f, indent=2)
+                json.dump(dump_resolved_config(role_config.inference, exclude=INFERENCE_CONFIG_EXCLUDE), f, indent=2)
 
 
 def _shell_join(cmd: list[str]) -> str:
@@ -268,14 +266,14 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
                 monitor(f"{role}_inference", inference)
 
         for role in (GENERATOR, JUDGE):
-            trainer_nodes = allocation[role].get("trainer_nodes", [])
+            trainer_nodes = allocation[role]["trainer_nodes"]
             trainer_location: str | list[str] | None
             if len(trainer_nodes) > 1:
                 trainer_location = trainer_nodes
                 rdzv_endpoint = f"{trainer_nodes[0]}:{get_free_port()}"
                 torchrun_dist_args = [f"--nnodes={len(trainer_nodes)}", "--node-rank", "{SLURM_PROCID}"]
             else:
-                trainer_location = allocation[role]["trainer_node"]
+                trainer_location = trainer_nodes[0] if trainer_nodes else None
                 rdzv_endpoint = f"localhost:{get_free_port()}"
                 torchrun_dist_args = []
             trainer = start_process(
