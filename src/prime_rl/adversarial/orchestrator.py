@@ -462,10 +462,12 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
         start_step = config.resume_step or 0
         if start_step:
             logger.info(f"Resuming generator and judge inference from step {start_step}")
-            await asyncio.gather(
-                wait_and_update(generator, start_step),
-                wait_and_update(judge, start_step),
-            )
+        # The trainers broadcast their startup weights and, in NCCL mode, block on the
+        # NCCL_READY handshake until each role's inference pool joins the receive.
+        await asyncio.gather(
+            wait_and_update(generator, start_step),
+            wait_and_update(judge, start_step),
+        )
         examples = list(generator.env.get_dataset(seed=config.generator.orchestrator.buffer.seed))
         if not examples:
             raise ValueError("Generator dataset is empty")
