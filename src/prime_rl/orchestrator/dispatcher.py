@@ -1,18 +1,20 @@
-"""RolloutDispatcher: schedules rollouts under a shared permit counter.
+"""Dispatcher: schedules rollouts under a shared permit counter.
 
-- Capacity (``max_inflight_episodes``) is shared across train + eval. One permit is
-  one episode: one ``run`` request against an env server.
+- Capacity (``max_inflight``) is shared across train + eval. One permit is
+  one episode: one ``run`` request against an env server. The cap is dynamic —
+  the concurrency controller moves it via ``set_limit``; refills are
+  burst-capped so a raised (or drained) cap never lands all its prefills at
+  once.
 - Optional rate limiting via ``AsyncLimiter(tasks_per_minute, 60)``.
 - Emit-everything invariant: every dispatched episode eventually reaches
-  ``out_q`` exactly once, as a ``list[Rollout]``. Failures
-  (env error, empty trajectory, task exception, off-policy cancel) carry
-  ``trace.last_error`` set; sinks decide drop / partial-train policy.
+  ``out_q`` exactly once. Failures remain episode errors;
+  sinks decide drop / partial-train policy.
 - ``DispatcherMode.PREFER_TRAIN`` / ``PREFER_EVAL`` controls which kind to
   schedule next. Transitions are level-triggered (driven by the eval
-  source's emptiness), so in-flight rollouts of the opposite kind drain
+  source's emptiness), so in-flight episodes of the opposite kind drain
   naturally on either side of an eval boundary.
 - ``on_version_pending`` (called by the watcher before the engines pause for
-  the weight update) bumps ``off_policy_steps`` on in-flight train rollouts and
+  the weight update) bumps ``off_policy_steps`` on in-flight train episodes and
   drops groups past ``max_off_policy_steps``.
   Eval rollouts are measurements for the policy version they started with,
   so they are allowed to finish even if training advances. Train rollouts
@@ -25,11 +27,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
+import traceback
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Literal
+from typing import Any, Literal
 
 import verifiers.v1 as vf
 from aiolimiter import AsyncLimiter
@@ -39,10 +44,10 @@ from prime_rl.orchestrator.eval_source import EvalSource
 from prime_rl.orchestrator.train_source import TrainSource
 from prime_rl.orchestrator.types import (
     GroupState,
-    InflightRollout,
+    InflightEpisode,
     Policy,
-    Rollout,
-    RolloutKind,
+    Progress,
+    WorkKind,
 )
 from prime_rl.utils.async_utils import safe_cancel, safe_cancel_all
 from prime_rl.utils.client import InferencePool
@@ -60,7 +65,7 @@ class DispatcherMode(Enum):
 class DispatcherMetrics:
     """Per-tick drain counters for the orchestrator's periodic log.
     ``drained()`` returns the current values and clears them; point-in-time
-    gauges live on ``RolloutDispatcher.gauges`` instead."""
+    gauges live on ``Dispatcher.gauges`` instead."""
 
     cancelled_by_kind_env: dict[tuple[Literal["train", "eval"], str], int] = field(
         default_factory=lambda: defaultdict(int)
@@ -113,48 +118,90 @@ class DispatcherMetrics:
         return keys
 
 
-class RolloutDispatcher:
+def _trace_task(task: vf.Task) -> vf.TraceTask:
+    return vf.TraceTask(
+        type=type(task).__name__,
+        data=task.data,
+        key=task.key,
+        hash=task.hash,
+    )
+
+
+def _validate_episode_task(episode: vf.Episode[Any, Any, Any], task: vf.Task) -> None:
+    expected = (task.key, task.hash)
+    actual = (episode.task.key, episode.task.hash)
+    if actual != expected:
+        raise ValueError(f"Episode task provenance {actual} does not match dispatched task {expected}")
+
+
+class Dispatcher:
     """``await dispatcher.start()`` runs the dispatch loop until ``stop()``.
-    Pulls examples from ``TrainSource`` / ``EvalSource``, schedules
-    rollouts under shared capacity, and emits ``Rollout``\\ s to
-    ``out_q``. The watcher drives ``on_version_pending`` for off-policy
+    Pulls examples from ``TrainSource`` / ``EvalSource``, schedules episodes
+    under shared capacity, and emits native verifier episodes to ``out_q``.
+    The watcher drives ``on_version_pending`` for off-policy
     cancellation; the orchestrator triggers eval epochs."""
 
     def __init__(
         self,
         *,
-        train_envs: TrainEnvs,
+        train_envs: TrainEnvs | None,
         eval_envs: EvalEnvs | None,
-        train_source: TrainSource,
+        train_source: TrainSource | None,
         eval_source: EvalSource | None,
         policy_pool: InferencePool,
         policy: Policy,
-        max_inflight_episodes: int,
+        progress: Progress | None,
+        initial_max_inflight: int,
+        max_inflight_ceiling: int | None,
         tasks_per_minute: float | None,
         max_off_policy_steps: int,
+        run_id: str,
+        run_name: str | None,
+        on_episode_complete: Callable[[str, str, int, float], None] | None = None,
     ) -> None:
         self.policy = policy
+        self.progress = progress
         self.train_envs = train_envs
         self.eval_envs = eval_envs
-        # Train rollouts go to the env sampler's pool; eval always
+        # Train rollouts go to the env's generation source; eval always
         # evaluates the policy.
         self.policy_pool = policy_pool
         self.train_source = train_source
         self.eval_source = eval_source
         self.max_off_policy_steps = max_off_policy_steps
+        self.run_id = run_id
+        self.run_name = run_name
+        # ``(env_name, kind, total_tokens, duration_s)`` per completed episode
+        self.on_episode_complete = on_episode_complete
 
-        self.max_inflight = max_inflight_episodes
-        self.inflight_permits = 0
+        # Starting value of the dynamic cap (the concurrency controller moves
+        # it); ``max_inflight_ceiling`` is the configured hard maximum, used to
+        # bound ``out_q``
+        self.max_inflight = initial_max_inflight
+        self.current_inflight = 0
         self.rate_limiter: AsyncLimiter | None = (
             AsyncLimiter(tasks_per_minute, time_period=60) if tasks_per_minute else None
         )
+        # Admission smoothing: the pool may only GROW by ``burst_cap`` per
+        # window. Replacing a completed episode is always free (each natural
+        # completion refunds one admission); only net expansion is metered.
+        # This keeps a raised cap or post-drain refill from landing a wall of
+        # prefills at once, without rate-limiting fast-turning workloads at
+        # steady state.
+        self.admission_window_s = 5.0
+        self.admission_window_start = time.monotonic()
+        self.admissions_in_window = 0
+        self.min_burst = max((env.config.group_size for env in train_envs or ()), default=8)
 
-        self.inflight: dict[asyncio.Task, InflightRollout] = {}
+        self.inflight: dict[asyncio.Task, InflightEpisode] = {}
         self.groups: dict[uuid.UUID, GroupState] = {}
 
-        # Bounded so the dispatcher backpressures on a slow sink. One entry per
-        # episode — the sinks count episodes, never loose traces.
-        self.out_q: asyncio.Queue[list[Rollout]] = asyncio.Queue(maxsize=max(8, self.max_inflight))
+        # Bounded so the dispatcher backpressures on a slow sink (unbounded
+        # when no hard ceiling is configured — the dynamic cap still bounds
+        # in-flight work). One entry per episode — the sinks count episodes,
+        # never loose traces.
+        maxsize = max(8, max_inflight_ceiling) if max_inflight_ceiling is not None else 0
+        self.out_q: asyncio.Queue[vf.Episode[Any, Any, Any]] = asyncio.Queue(maxsize=maxsize)
 
         self.mode: DispatcherMode = DispatcherMode.PREFER_TRAIN
         # Set by the orchestrator after the final train step; pipeline then
@@ -171,13 +218,14 @@ class RolloutDispatcher:
         self.stopped = asyncio.Event()
         self.task: asyncio.Task | None = None
 
-    def _train_pool_for(self, env_name: str) -> tuple[InferencePool, str, bool]:
+    def _train_generation_for(self, env_name: str) -> tuple[InferencePool, str, bool]:
         """``(pool, model_name, is_live)`` for *train* rollouts of this env —
-        the env sampler's pool. (Eval always uses the policy.)"""
-        sampler = self.train_envs.get(env_name).sampler
-        if sampler.samples_from_live_policy:
-            return sampler.pool, self.policy.model_name, True
-        return sampler.pool, sampler.pool.model_name, False
+        eval always uses the policy."""
+        assert self.train_envs is not None  # train groups only exist when train is configured
+        source = self.train_envs.get(env_name).generation_source
+        if source.uses_live_policy:
+            return source.pool, self.policy.model_name, True
+        return source.pool, source.pool.model_name, False
 
     @property
     def inflight_train_count(self) -> int:
@@ -189,11 +237,55 @@ class RolloutDispatcher:
 
     @property
     def available_permits(self) -> int:
-        return self.max_inflight - self.inflight_permits
+        return self.max_inflight - self.current_inflight
+
+    def set_limit(self, max_inflight: int) -> None:
+        """Move the in-flight cap (concurrency controller hook). A cap below
+        the current in-flight count sheds nothing — admissions just stay
+        blocked until enough episodes finish."""
+        self.max_inflight = max_inflight
+
+    def cancel_inflight(self, n: int) -> None:
+        """Cancel roughly ``n`` in-flight train episodes, youngest groups
+        first (least inference spend so far). Called on an overload cut so
+        the working set shrinks immediately instead of waiting for the
+        over-admitted episodes to finish at thrashed throughput."""
+        asyncio.create_task(self._cancel_inflight(n))
+
+    async def _cancel_inflight(self, n: int) -> None:
+        # A group's age is its OLDEST member's start: max() would make a
+        # long-running group look young the moment it schedules another
+        # member, cancelling the most sunk cost instead of the least
+        group_age: dict[uuid.UUID, float] = {}
+        for meta in self.inflight.values():
+            if meta.kind != "train":
+                continue
+            age = group_age.get(meta.group_id)
+            group_age[meta.group_id] = meta.started_at if age is None else min(age, meta.started_at)
+        shed = 0
+        for group_id in sorted(group_age, key=lambda gid: group_age[gid], reverse=True):
+            if shed >= n:
+                break
+            # Count only live cancellations toward the excess: drop_group's
+            # return includes never-dispatched markers, which free no permits
+            live = sum(1 for meta in self.inflight.values() if meta.group_id == group_id)
+            await self.drop_group(group_id)
+            shed += live
+        if shed:
+            get_logger().warning(f"Cancelled {shed} youngest in-flight episodes after overload cut")
+
+    def admission_budget(self) -> int:
+        """Admissions still allowed in the current burst window."""
+        now = time.monotonic()
+        if now - self.admission_window_start >= self.admission_window_s:
+            self.admission_window_start = now
+            self.admissions_in_window = 0
+        burst_cap = max(self.min_burst, self.max_inflight // 10)
+        return burst_cap - self.admissions_in_window
 
     @property
-    def inflight_by_env(self) -> dict[tuple[RolloutKind, str], int]:
-        counts: dict[tuple[RolloutKind, str], int] = defaultdict(int)
+    def inflight_by_env(self) -> dict[tuple[WorkKind, str], int]:
+        counts: dict[tuple[WorkKind, str], int] = defaultdict(int)
         for meta in self.inflight.values():
             counts[(meta.kind, meta.env_name)] += 1
         return dict(counts)
@@ -209,7 +301,7 @@ class RolloutDispatcher:
         (``next_fresh_group``), but its ``group_size`` rollouts dispatch one at a time across
         ``fill_inflight`` passes — so the queue can be empty while a group is still mid-schedule."""
         return bool(self.eval_source) or any(
-            g.kind == "eval" and g.rollouts_to_schedule > 0 for g in self.groups.values()
+            g.kind == "eval" and g.episodes_to_schedule > 0 for g in self.groups.values()
         )
 
     @property
@@ -256,13 +348,13 @@ class RolloutDispatcher:
                     timeout=0.5,  # wake periodically to re-check fill (mode flips)
                 )
                 for task in done:
-                    await self.handle_completed_rollout(task)
+                    await self.handle_completed_episode(task)
         except asyncio.CancelledError:
             return
 
     async def stop(self) -> None:
         self.stopped.set()
-        await self.cancel_inflight_rollouts()
+        await self.cancel_inflight_episodes()
         if self.task is not None:
             await safe_cancel(self.task)
             self.task = None
@@ -282,9 +374,10 @@ class RolloutDispatcher:
         for meta in self.inflight.values():
             if meta.kind != "train":
                 continue
-            # Frozen-sourced rollouts never go stale — their sampler doesn't
+            # Frozen-sourced rollouts never go stale — their generation source doesn't
             # change with policy updates.
-            if not self.train_envs.get(meta.env_name).sampler.samples_from_live_policy:
+            assert self.train_envs is not None
+            if not self.train_envs.get(meta.env_name).generation_source.uses_live_policy:
                 continue
             meta.off_policy_steps += 1
             if meta.off_policy_steps > self.max_off_policy_steps:
@@ -296,7 +389,7 @@ class RolloutDispatcher:
 
         if cancelled:
             get_logger().warning(
-                f"Cancelled {cancelled} train rollouts past max_off_policy_steps={self.max_off_policy_steps}. "
+                f"Cancelled {cancelled} train episodes past max_off_policy_steps={self.max_off_policy_steps}. "
                 "Consider increasing it to avoid this."
             )
 
@@ -310,7 +403,7 @@ class RolloutDispatcher:
         respects it. When ``PREFER_EVAL``'s source exhausts we flip back to
         ``PREFER_TRAIN`` so the eval tail drains alongside fresh train."""
         while True:
-            if self.available_permits <= 0:
+            if self.available_permits <= 0 or self.admission_budget() <= 0:
                 return
 
             if self.mode == DispatcherMode.PREFER_EVAL:
@@ -337,10 +430,10 @@ class RolloutDispatcher:
         if new_mode == self.mode:
             return
         prefer = "eval" if new_mode == DispatcherMode.PREFER_EVAL else "train"
-        get_logger().info(f"Switching dispatcher mode to prefer {prefer} rollouts because {reason}")
+        get_logger().info(f"Switching dispatcher mode to prefer {prefer} episodes because {reason}")
         self.mode = new_mode
 
-    async def try_schedule(self, kind: RolloutKind) -> bool:
+    async def try_schedule(self, kind: WorkKind) -> bool:
         """Schedule one rollout of ``kind``: prefer continuing an existing
         group (keeps prefix-cache hits); otherwise open a fresh group from
         the corresponding source. Returns False if nothing could be
@@ -352,21 +445,22 @@ class RolloutDispatcher:
             return False
 
         for gid, group in list(self.groups.items()):
-            if group.kind != kind or group.rollouts_to_schedule <= 0:
+            if group.kind != kind or group.episodes_to_schedule <= 0:
                 continue
-            return await self.schedule_group_rollout(gid, group)
+            return await self.schedule_group_episode(gid, group)
 
         fresh = self.next_fresh_group(kind, envs)
         if fresh is None:
             return False
         gid = uuid.uuid4()
         self.groups[gid] = fresh
-        return await self.schedule_group_rollout(gid, fresh)
+        return await self.schedule_group_episode(gid, fresh)
 
-    def next_fresh_group(self, kind: RolloutKind, envs) -> GroupState | None:
+    def next_fresh_group(self, kind: WorkKind, envs) -> GroupState | None:
         """Pop the next example from the corresponding source and wrap it in
         a ``GroupState``. Returns ``None`` if the source is empty."""
         if kind == "train":
+            assert self.train_source is not None
             source = self.train_source
         else:
             assert self.eval_source is not None
@@ -383,20 +477,20 @@ class RolloutDispatcher:
             kind=kind,
             env_name=env_name,
             task=example["task"],
-            rollouts_to_schedule=group_size,
-            target_rollouts=group_size,
+            episodes_to_schedule=group_size,
+            target_episodes=group_size,
             eval_step=eval_step,
             policy_version_at_start=self.policy.version,
         )
 
-    async def schedule_group_rollout(self, group_id: uuid.UUID, group: GroupState) -> bool:
+    async def schedule_group_episode(self, group_id: uuid.UUID, group: GroupState) -> bool:
         """Dispatch one ``run`` task for this group.
 
         Returns False only if we couldn't even schedule one rollout (no clients
         ready, no permits). Returns True after issuing one task — the caller
         loops to keep scheduling.
         """
-        # Train rollouts use the env sampler's pool via the
+        # Train rollouts use the env's generation source via the
         # renderer/token train client. Eval always evaluates the policy and
         # goes through the eval client (chat-completions) so eval scores stay
         # comparable.
@@ -404,7 +498,7 @@ class RolloutDispatcher:
             pool, model_name = self.policy_pool, self.policy.model_name
             live_sourced = True
         else:
-            pool, model_name, live_sourced = self._train_pool_for(group.env_name)
+            pool, model_name, live_sourced = self._train_generation_for(group.env_name)
 
         if group.pinned_client is None:
             group.pinned_client = pool.eval_client if group.kind == "eval" else pool.train_client
@@ -422,8 +516,9 @@ class RolloutDispatcher:
         else:
             cache_salt = None
 
-        group.rollouts_to_schedule -= 1
+        group.episodes_to_schedule -= 1
         await self.acquire()
+        self.admissions_in_window += 1
         task = asyncio.create_task(
             env.run(
                 client=client,
@@ -433,98 +528,132 @@ class RolloutDispatcher:
             )
         )
 
-        self.inflight[task] = InflightRollout(
+        self.inflight[task] = InflightEpisode(
             kind=group.kind,
             env_name=group.env_name,
             group_id=group_id,
+            task=group.task,
             policy_version=group.policy_version_at_start,
+            step=self._work_step(group.kind, group.eval_step),
             client_config=client,
             eval_step=group.eval_step,
+            started_at=time.monotonic(),
         )
         return True
+
+    def _work_step(self, kind: WorkKind, eval_step: int | None) -> int:
+        if kind == "eval":
+            assert eval_step is not None
+            return eval_step
+        if self.progress is None:
+            raise RuntimeError("Train dispatch requires progress state")
+        return self.progress.step
 
     async def acquire(self) -> None:
         """Reserve one permit + rate-limit it. Caller must precheck
         ``available_permits >= 1``; this is not a blocking acquire."""
         if self.rate_limiter is not None:
             await self.rate_limiter.acquire()
-        self.inflight_permits += 1
+        self.current_inflight += 1
 
-    def release(self) -> None:
-        self.inflight_permits -= 1
+    def release(self, *, refund_admission: bool = False) -> None:
+        """Free one permit. ``refund_admission`` only on natural completions:
+        refunding cancelled episodes would hand a mass shed's worth of burst
+        budget to the refill while the overload is still draining."""
+        self.current_inflight -= 1
+        if refund_admission:
+            self.admissions_in_window = max(0, self.admissions_in_window - 1)
 
-    async def handle_completed_rollout(self, task: asyncio.Task) -> None:
-        """Emit every dispatched episode exactly once to ``out_q``. Task
-        exceptions synthesize an error-marker episode so the sink's
-        count-to-``group_size`` finalization still triggers. Cancelled tasks
-        (popped by ``drop_group``) raise ``CancelledError`` and are discarded —
-        ``drop_group`` already emitted their markers.
-        """
+    async def handle_completed_episode(self, task: asyncio.Task) -> None:
+        """Emit every dispatched episode exactly once to ``out_q``."""
         meta = self.inflight.pop(task, None)
         if meta is None:
-            return  # already handled by drop_group / cancel_inflight_rollouts
-        self.release()
+            return  # already handled by drop_group / cancel_inflight_episodes
+        self.release(refund_admission=True)
         group = self.groups.get(meta.group_id)
 
         is_synth_exception = False
         try:
-            result = task.result()
-            rollouts: list[Rollout] = result if isinstance(result, list) else [result]
-            if not rollouts:
-                raise RuntimeError("env run returned an empty episode (no traces)")
+            episode: vf.Episode[Any, Any, Any] = task.result()
         except asyncio.CancelledError:
             return
         except Exception as exc:
-            get_logger().warning(f"Rollout task failed in group {meta.group_id} ({meta.env_name}): {exc!r}")
-            task_idx = group.task.data.idx if group is not None else -1
-            rollouts = [
-                Rollout(
-                    task=vf.TraceTask(type="Task", data=vf.TaskData(idx=task_idx, prompt=None)),
-                    agent=vf.AgentInfo(config=vf.AgentConfig()),
-                )
-            ]
-            for r in rollouts:
-                r.record_error(exc)
+            get_logger().warning(f"Episode task failed in group {meta.group_id} ({meta.env_name}): {exc!r}")
+            episode = vf.WireEpisode(
+                env=vf.EnvInfo(id=meta.env_name),
+                task=_trace_task(meta.task),
+                ok=False,
+                errors=[
+                    vf.Error(
+                        type=type(exc).__name__,
+                        message=str(exc),
+                        traceback="".join(traceback.format_exception(exc)),
+                    )
+                ],
+            )
             is_synth_exception = True
 
-        for r in rollouts:
-            if not r.has_error and r.num_turns == 0:
+        if not episode.traces and episode.ok:
+            episode.ok = False
+            episode.errors.append(vf.Error(type="EmptyEpisode", message="Episode returned with no traces"))
+
+        for trace in episode.traces:
+            if not trace.has_error and trace.num_turns == 0:
                 # Empty trajectory: promote to an explicit error so the sink
                 # treats it like any other failure (``has_error`` reads ``ok``)
-                r.errors.append(vf.Error(type="EmptyTrajectory", message="Rollout returned with no trajectory steps"))
-                r.ok = False
+                trace.errors.append(vf.Error(type="EmptyTrajectory", message="Trace returned with no trajectory steps"))
+                trace.ok = False
+                episode.ok = False
                 get_logger().warning(f"Empty trajectory in group {meta.group_id} ({meta.env_name})")
-            if r.has_error:
+            if trace.has_error:
                 self.metrics.record_error(kind=meta.kind, env_name=meta.env_name)
-                if not is_synth_exception and r.last_error is not None:
+                if not is_synth_exception and trace.last_error is not None:
                     get_logger().warning(
-                        f"Rollout failed in group {meta.group_id} ({meta.env_name}) — {r.last_error.type}: {r.last_error.message}"
+                        f"Trace failed in group {meta.group_id} ({meta.env_name}) — "
+                        f"{trace.last_error.type}: {trace.last_error.message}"
                     )
-        await self.emit_episode(meta, group, rollouts)
+        if not episode.ok and not episode.traces:
+            self.metrics.record_error(kind=meta.kind, env_name=meta.env_name)
+        if not is_synth_exception and self.on_episode_complete is not None and meta.started_at > 0:
+            self.on_episode_complete(
+                meta.env_name, meta.kind, episode.num_total_tokens, time.monotonic() - meta.started_at
+            )
+        await self.emit_episode(meta, group, episode)
 
-    async def emit_episode(self, meta: InflightRollout, group: GroupState | None, rollouts: list[Rollout]) -> None:
-        """Stamp prime-rl metadata onto one completed episode and put it on
-        ``out_q``. Pops the group from ``self.groups`` once every owed episode
-        has been emitted."""
+    async def emit_episode(
+        self,
+        meta: InflightEpisode,
+        group: GroupState | None,
+        episode: vf.Episode[Any, Any, Any],
+    ) -> None:
+        """Stamp one completed episode with its dispatch provenance and emit it."""
+        _validate_episode_task(episode, meta.task)
         eval_step = meta.eval_step
         policy_version = meta.policy_version
         if group is not None:
             eval_step = group.eval_step
             policy_version = group.policy_version_at_start
             group.emitted += 1
-            if group.emitted >= group.target_rollouts:
+            if group.emitted >= group.target_episodes:
                 self.groups.pop(meta.group_id, None)
 
-        for rollout in rollouts:
-            rollout.kind = meta.kind
-            rollout.env_name = meta.env_name
-            rollout.group_id = meta.group_id
-            rollout.policy_version = policy_version
-            rollout.off_policy_steps = meta.off_policy_steps
-            if meta.kind == "eval":
-                assert eval_step is not None, "eval rollout missing eval_step"
-                rollout.eval_step = eval_step
-        await self.out_q.put(rollouts)
+        if meta.kind == "eval":
+            assert eval_step is not None, "eval episode missing eval_step"
+        episode.env.name = meta.env_name
+        episode.group = vf.GroupInfo(id=str(meta.group_id))
+        live_policy = meta.kind == "eval"
+        if meta.kind == "train":
+            assert self.train_envs is not None
+            live_policy = self.train_envs.get(meta.env_name).generation_source.uses_live_policy
+        policy = vf.PolicySpan(start=policy_version, end=self.policy.version) if live_policy else None
+        work: vf.WorkInfo = (
+            vf.EvalWorkInfo(step=meta.step, policy=policy)
+            if meta.kind == "eval"
+            else vf.TrainWorkInfo(step=meta.step, policy=policy)
+        )
+        run = vf.TrainRunInfo(id=self.run_id, name=self.run_name, work=work)
+        episode.record_run(run)
+        await self.out_q.put(episode)
 
     async def drop_group(self, group_id: uuid.UUID) -> int:
         """Cancel remaining in-flight tasks for this group and emit a
@@ -532,14 +661,12 @@ class RolloutDispatcher:
         (both in-flight and not-yet-scheduled). Returns the count for
         off-policy metrics."""
         group = self.groups.pop(group_id, None)
-        task_idx = group.task.data.idx if group is not None else -1
-
         # Sync claim phase: pop matching tasks from ``self.inflight`` and
         # release their permits in one non-yielding sweep. After this loop
         # the dropped tasks are no longer reachable from ``self.inflight``,
-        # so ``handle_completed_rollout``'s existing None-guard makes the
+        # so ``handle_completed_episode``'s existing None-guard makes the
         # subsequent async emit phase race-free.
-        claimed: list[tuple[asyncio.Task, InflightRollout]] = []
+        claimed: list[tuple[asyncio.Task, InflightEpisode]] = []
         for task, meta in list(self.inflight.items()):
             if meta.group_id != group_id:
                 continue
@@ -549,52 +676,53 @@ class RolloutDispatcher:
 
         tasks_to_cancel = [task for task, _ in claimed]
         inflight_cancelled = len(claimed)
-        last_meta: InflightRollout | None = claimed[-1][1] if claimed else None
+        last_meta: InflightEpisode | None = claimed[-1][1] if claimed else None
         for _, meta in claimed:
-            trace = Rollout(
-                task=vf.TraceTask(type="Task", data=vf.TaskData(idx=task_idx, prompt=None)),
-                agent=vf.AgentInfo(config=vf.AgentConfig()),
+            episode = vf.WireEpisode(
+                env=vf.EnvInfo(id=meta.env_name),
+                task=_trace_task(meta.task),
                 ok=False,
                 errors=[vf.Error(type="Cancelled", message="Off-policy cancel")],
-                stop_condition="error",
             )
-            await self.emit_episode(meta, group, [trace])
+            await self.emit_episode(meta, group, episode)
 
-        # The group may have rollouts that were never dispatched
-        # (``rollouts_to_schedule > 0``). Emit markers for those too so the
-        # sink hits ``target_rollouts``
+        # The group may have episodes that were never dispatched. Emit markers
+        # for those too so the sink reaches ``target_episodes``.
         #
         # ``last_meta`` can be ``None`` if the only inflight task for this
         # group completed naturally between ``on_version_pending``'s snapshot
         # and us reaching it — synthesize a stand-in from the group state
         unscheduled_cancelled = 0
-        if group is not None and group.rollouts_to_schedule > 0:
-            fallback_meta = last_meta or InflightRollout(
+        if group is not None and group.episodes_to_schedule > 0:
+            fallback_meta = last_meta or InflightEpisode(
                 kind=group.kind,
                 env_name=group.env_name,
                 group_id=group_id,
+                task=group.task,
                 policy_version=group.policy_version_at_start,
+                step=self._work_step(group.kind, group.eval_step),
                 eval_step=group.eval_step,
             )
-            unscheduled_cancelled = group.rollouts_to_schedule
+            unscheduled_cancelled = group.episodes_to_schedule
             for _ in range(unscheduled_cancelled):
-                trace = Rollout(
-                    task=vf.TraceTask(type="Task", data=vf.TaskData(idx=task_idx, prompt=None)),
-                    agent=vf.AgentInfo(config=vf.AgentConfig()),
+                episode = vf.WireEpisode(
+                    env=vf.EnvInfo(id=group.env_name),
+                    task=_trace_task(group.task),
                     ok=False,
                     errors=[vf.Error(type="Cancelled", message="Off-policy cancel")],
-                    stop_condition="error",
                 )
-                await self.emit_episode(fallback_meta, group, [trace])
+                await self.emit_episode(fallback_meta, group, episode)
 
         cancelled = inflight_cancelled + unscheduled_cancelled
         if cancelled > 0:
             meta_for_log = last_meta or (
-                InflightRollout(
+                InflightEpisode(
                     kind=group.kind,
                     env_name=group.env_name,
                     group_id=group_id,
+                    task=group.task,
                     policy_version=group.policy_version_at_start if group else 0,
+                    step=self._work_step(group.kind, group.eval_step),
                     eval_step=group.eval_step,
                 )
                 if group is not None
@@ -611,8 +739,8 @@ class RolloutDispatcher:
             await safe_cancel_all(tasks_to_cancel)
         return cancelled
 
-    async def cancel_inflight_rollouts(self) -> None:
-        """Cancel all in-flight rollouts. Used on shutdown — doesn't emit
+    async def cancel_inflight_episodes(self) -> None:
+        """Cancel all in-flight episodes. Used on shutdown — doesn't emit
         markers since the sinks are being torn down anyway."""
         for meta in self.inflight.values():
             self.metrics.record_cancellation(kind=meta.kind, env_name=meta.env_name)
@@ -623,8 +751,8 @@ class RolloutDispatcher:
         if tasks:
             await safe_cancel_all(tasks)
 
-    async def cancel_inflight_train_rollouts(self) -> int:
-        """Cancel in-flight train rollouts, leaving eval alone. Used by the
+    async def cancel_inflight_train_episodes(self) -> int:
+        """Cancel in-flight train episodes, leaving eval alone. Used by the
         orchestrator at ``max_steps`` so triggered eval can still complete
         through the pipeline while wasted train inference is short-circuited."""
         train_tasks: list[asyncio.Task] = []
@@ -650,11 +778,10 @@ class RolloutDispatcher:
     def gauges(self) -> dict[str, float]:
         """Instantaneous, read-only gauges sampled by the periodic logger."""
         return {
-            "dispatcher/inflight_train": float(self.inflight_train_count),
-            "dispatcher/inflight_eval": float(self.inflight_eval_count),
+            "dispatcher/inflight/train": float(self.inflight_train_count),
+            "dispatcher/inflight/eval": float(self.inflight_eval_count),
             "dispatcher/queued/eval": float(self.queued_eval_examples),
             "dispatcher/mode": float(self.mode == DispatcherMode.PREFER_EVAL),
-            "dispatcher/groups_in_flight": float(len(self.groups)),
-            "dispatcher/off_policy_level_max": float(self.max_off_policy_level),
-            "dispatcher/off_policy_level_mean": self.mean_off_policy_level,
+            "dispatcher/off_policy_level/max": float(self.max_off_policy_level),
+            "dispatcher/off_policy_level/mean": self.mean_off_policy_level,
         }

@@ -55,19 +55,20 @@ class ActivationOffloadingConfig(BaseConfig):
 
 
 class OptimizerInBackwardOffloadConfig(BaseConfig):
-    """Full CPU optimizer offload: FP32 masters, moments, and accumulated gradients live in
-    CPU RAM, each optimizer chunk runs on CPU as soon as its last gradient arrives, and the
-    refreshed BF16 weights stream back while backward is still executing.
+    """Full CPU optimizer offload: FP32 masters, optimizer state (AdamW moments; SignSGD is
+    stateless), and accumulated gradients live in CPU RAM, each optimizer chunk runs on CPU as
+    soon as its last gradient arrives, and the refreshed BF16 weights stream back while backward
+    is still executing.
 
     Gradient numerics: gradients are reduced across ranks in FP32 (``reduce_dtype``) but FSDP2
     materializes them in the sharded parameter's dtype, which is BF16 for the offload compute
     model — so each gradient is rounded to BF16 once before the FP32 CPU update. Masters,
-    moments, accumulation, and Adam arithmetic remain FP32. For gradient numerics bit-faithful
-    to that path, disable offloading.
+    moments, accumulation, and optimizer arithmetic remain FP32. For gradient numerics
+    bit-faithful to that path, disable offloading.
     """
 
     cpu_optimizer_backend: Literal["native", "torch"] = "native"
-    """CPU AdamW implementation used by full offload. ``native`` is the production kernel; ``torch`` is a slower debugging and parity fallback."""
+    """CPU optimizer implementation used by full offload (AdamW or SignSGD). ``native`` is the production kernel; ``torch`` is a slower debugging and parity fallback."""
 
     numa_bind: bool = True
     """Pin each rank's CPUs to its GPU's NUMA node. Disable when the launcher already manages CPU affinity or GPU sysfs topology is unavailable."""
@@ -241,6 +242,9 @@ class ModelConfig(BaseModelConfig):
     moe_use_grouped_mm: bool = True
     """Use grouped mm for MoE layers. Requires compute capability ≥ 9.0."""
 
+    moe_fused_kernel: bool = False
+    """Run MoE routed experts through the vendored fused MoE CUDA kernel (``prime_kernels.flash_moe``) in forward; backward recomputes the reference grouped-mm path. Picks the mxfp8 kernel when ``quantization`` is MXFP8 with ``enable_grouped_gemm`` (which additionally needs ``hidden_size`` divisible by 256), otherwise the bf16 one. Requires the ``prime-kernels`` wheel, Blackwell (SM100) GPUs, ``ep=1``, ``model.impl='custom'``, MoE layers with output-weighted scores (``score_before_experts=False``), and ``moe_intermediate_size`` divisible by 128."""
+
     quantization: QuantizationConfig | None = None
 
     index_cache: IndexCacheConfig | None = None
@@ -255,7 +259,7 @@ class ModelConfig(BaseModelConfig):
     debug: DebugModelConfig = DebugModelConfig()
     """Debugging knobs for the model and distributed training."""
 
-    fused_lm_head_token_chunk_size: int | Literal["disabled"] = 1024
+    fused_lm_head_token_chunk_size: int | Literal["disabled"] = 8192
     """Flattened token chunk size for the fused LM head. ``int >= 1`` sets the tokens per LM-head chunk explicitly; ``disabled`` uses the vanilla LM head. SFT training silently disables this (not supported yet)."""
 
     @model_validator(mode="before")
@@ -393,6 +397,28 @@ SchedulerConfig: TypeAlias = Annotated[
 ]
 
 
+def validate_scheduler(scheduler: SchedulerConfig, max_steps: int | None) -> None:
+    """Check scheduler phases against max_steps so misconfigurations fail at config time."""
+    if isinstance(scheduler, LinearSchedulerConfig):
+        if scheduler.warmup_steps == 0 and scheduler.decay_steps == 0:
+            raise ValueError(
+                "Linear scheduler requires warmup_steps > 0 or decay_steps > 0 (use the constant scheduler instead)"
+            )
+        if scheduler.decay_steps > 0:
+            if max_steps is None:
+                raise ValueError("Must specify max_steps when using a linear scheduler with decay_steps > 0")
+            if scheduler.warmup_steps + scheduler.decay_steps > max_steps:
+                raise ValueError(
+                    f"warmup_steps ({scheduler.warmup_steps}) + decay_steps ({scheduler.decay_steps}) "
+                    f"must not exceed max_steps ({max_steps})"
+                )
+    if isinstance(scheduler, CosineSchedulerConfig):
+        if max_steps is None:
+            raise ValueError("Must specify max_steps when using a cosine scheduler")
+        if scheduler.warmup_steps >= max_steps:
+            raise ValueError(f"warmup_steps ({scheduler.warmup_steps}) must be less than max_steps ({max_steps})")
+
+
 class BaseOptimizerConfig(BaseConfig):
     lr: float = Field(1e-6, ge=0)
     """Peak learning rate."""
@@ -446,32 +472,12 @@ OptimizerConfig: TypeAlias = Annotated[
 ]
 
 
-class WeightCheckpointConfig(BaseConfig):
-    save_sharded: bool = True
-    """Save the weight checkpoint in sharded format."""
-
-    save_format: Literal["safetensors", "torch"] = "safetensors"
-    """Weight checkpoint serialization format."""
-
-    save_adapter_separately: bool = False
-    """Save LoRA adapters separately before merging into full model weights."""
-
-
 class CheckpointConfig(BaseConfig):
     output_dir: Path | None = None
-    """Override directory for checkpoints and weights. If set, checkpoints and weight snapshots are written here instead of under the trainer ``output_dir`` — useful for writing large checkpoints to a separate storage volume."""
+    """Override directory for checkpoints. If set, checkpoints are written here instead of under the trainer ``output_dir`` — useful for writing large checkpoints to a separate storage volume."""
 
     interval: int | None = Field(None, ge=1)
     """Interval at which to save the training checkpoint. If None, only checkpoints at the end of training."""
-
-    weights: WeightCheckpointConfig | None = WeightCheckpointConfig()
-    """Weight-checkpoint sub-configuration. If None, no HF-compatible weight checkpoints are written."""
-
-    skip_gather_master_weights: bool = False
-    """Skip gathering and saving HF-compatible weight checkpoints. Useful for large models where the gather is expensive and only DCP checkpoints are needed."""
-
-    weights_only: bool = False
-    """Save only weight checkpoints (no optimizer/scheduler state). Much faster and smaller than full checkpoints, but cannot resume training."""
 
     keep_last: int | None = Field(None, ge=1)
     """Keep at most this many recent step checkpoints on disk. If None, never clean old checkpoints based on recency."""
@@ -552,12 +558,6 @@ class BaseWeightBroadcastConfig(BaseConfig):
 
 class FileSystemWeightBroadcastConfig(BaseWeightBroadcastConfig):
     type: Literal["filesystem"] = "filesystem"
-
-    save_sharded: bool = True
-    """Save the weight checkpoint in sharded format."""
-
-    save_format: Literal["safetensors", "torch"] = "safetensors"
-    """Weight checkpoint serialization format."""
 
 
 class InMemoryWeightBroadcastConfig(BaseWeightBroadcastConfig):
@@ -690,9 +690,9 @@ class TrainerConfig(BaseConfig):
         return self
 
     @model_validator(mode="after")
-    def full_optimizer_offload_requires_adamw(self):
-        if self.model.full_offload and self.optim.type != "adamw":
-            raise ValueError("Full optimizer offload only supports AdamW")
+    def full_optimizer_offload_requires_supported_optimizer(self):
+        if self.model.full_offload and self.optim.type not in ("adamw", "sign_sgd"):
+            raise ValueError("Full optimizer offload only supports AdamW and SignSGD")
         return self
 
     @model_validator(mode="after")
@@ -737,14 +737,8 @@ class TrainerConfig(BaseConfig):
         return self
 
     @model_validator(mode="after")
-    def validate_lora_adapter_saving(self):
-        if self.ckpt and self.ckpt.weights and self.ckpt.weights.save_adapter_separately:
-            lora_enabled = self.model and self.model.lora
-            if not lora_enabled:
-                raise ValueError(
-                    "save_adapter_separately=True requires LoRA to be enabled. "
-                    "Set model.lora or disable save_adapter_separately."
-                )
+    def validate_scheduler_steps(self):
+        validate_scheduler(self.scheduler, self.max_steps)
         return self
 
     @model_validator(mode="after")
