@@ -3,7 +3,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
-#SBATCH --partition=main
+#SBATCH --partition=gpu
 #SBATCH --exclusive
 #SBATCH --mem=0
 #SBATCH --time=04:00:00
@@ -18,7 +18,7 @@ cd "${SLURM_SUBMIT_DIR}"
 [ -f .env ] && source .env
 export TORCH_BLAS_PREFER_CUBLASLT=1
 export VLLM_ENGINE_READY_TIMEOUT_S=1200
-export HF_HOME="${HF_HOME:-/data/$USER/cache/huggingface}"
+export HF_HOME="${HF_HOME:-$HOME/data/cache/huggingface}"
 export WANDB_ENTITY="${WANDB_ENTITY:-edison-scientific}"
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS=1
