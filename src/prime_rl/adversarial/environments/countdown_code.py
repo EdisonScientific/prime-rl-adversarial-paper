@@ -1,8 +1,6 @@
 import ast
 import json
-import math
 import os
-import re
 import subprocess
 import sys
 from fractions import Fraction
@@ -172,39 +170,6 @@ def countdown_extract_expr(solution_py: str) -> str | None:
     return None
 
 
-def countdown_eval_expr(expr: str) -> float | None:
-    return float(eval(expr, {"__builtins__": None}, {}))
-
-
-def countdown_expression_metrics(expr: str | None, numbers: list[int], target: int) -> dict[str, float]:
-    if expr is None:
-        return {
-            "countdown_expr_present": 0.0,
-            "countdown_uses_required_numbers": 0.0,
-            "countdown_allowed_chars": 0.0,
-            "countdown_target_error": 1.0,
-            "countdown_target_error_clipped": 1.0,
-        }
-    used_numbers = [int(number) for number in re.findall(r"\d+", expr)]
-    uses_required_numbers = sorted(used_numbers) == sorted(numbers)
-    allowed_chars = re.fullmatch(r"['\"]?[\d\s+\-*/().]+['\"]?", expr) is not None
-    target_error = 1.0
-    if allowed_chars:
-        try:
-            result = countdown_eval_expr(expr)
-        except Exception:
-            result = None
-        if result is not None and math.isfinite(result):
-            target_error = abs(result - float(target)) / max(abs(float(target)), 1.0)
-    return {
-        "countdown_expr_present": 1.0,
-        "countdown_uses_required_numbers": float(uses_required_numbers),
-        "countdown_allowed_chars": float(allowed_chars),
-        "countdown_target_error": target_error,
-        "countdown_target_error_clipped": min(target_error, 1.0),
-    }
-
-
 def countdown_proxy_reward(files: dict[str, str] | None) -> float:
     if files is None:
         return 0.0
@@ -235,21 +200,6 @@ def countdown_proxy_reward(files: dict[str, str] | None) -> float:
     return 0.2
 
 
-def countdown_gold_reward(files: dict[str, str] | None, numbers: list[int], target: int) -> float:
-    if files is None:
-        return 0.0
-    try:
-        expr = countdown_extract_expr(countdown_clean_code(files["solution.py"].strip()))
-    except Exception:
-        return 0.0
-    metrics = countdown_expression_metrics(expr, numbers, target)
-    return float(
-        metrics["countdown_uses_required_numbers"] == 1.0
-        and metrics["countdown_allowed_chars"] == 1.0
-        and metrics["countdown_target_error"] < 1e-10
-    )
-
-
 def countdown_judge_task(numbers: list[int], target: int) -> str:
     return f"Numbers: {numbers}\nTarget: {target}"
 
@@ -267,36 +217,29 @@ def countdown_compact_judge_candidate(candidate: str) -> tuple[str, str]:
     return expr if expr is not None else "<missing or invalid expr>", "yes" if test_modified else "no"
 
 
-def countdown_verified_reference_from_row(row: dict[str, Any], numbers: list[int], target: int) -> tuple[str, str]:
+def countdown_reference_from_row(row: dict[str, Any], numbers: list[int], target: int) -> str:
+    """Reference solution JSON. Prepared datasets carry solutions that were
+    gold-verified at generation time; raw sources without one are solved here."""
     reference = row.get("solution") or row.get("reference_solution") or row.get("reference")
     if reference is None:
-        reference_expr = countdown_find_expression(numbers, target)
-        if reference_expr is None:
-            raise ValueError(f"Countdown example is not solvable: numbers={numbers}, target={target}")
-        return countdown_reference_json(numbers, target, reference_expr), reference_expr
+        expr = countdown_find_expression(numbers, target)
+    else:
+        files = countdown_files_from_reference(reference)
+        expr = countdown_extract_expr(countdown_clean_code(files["solution.py"].strip()))
+    if expr is None:
+        raise ValueError(f"Countdown example has no usable reference expr: numbers={numbers}, target={target}")
+    return countdown_reference_json(numbers, target, expr)
 
-    files = countdown_files_from_reference(reference)
-    if files is None:
-        raise ValueError(f"Countdown reference solution is not valid JSON: numbers={numbers}, target={target}")
-    cleaned_files = {
-        "solution.py": countdown_clean_code(files["solution.py"].strip()),
-        "test.py": countdown_clean_code(files["test.py"].strip()),
-    }
-    if cleaned_files["test.py"].strip() != COUNTDOWN_TEST_PY.strip():
-        raise ValueError(f"Countdown reference modifies test.py: numbers={numbers}, target={target}")
-    if countdown_gold_reward(cleaned_files, numbers, target) != 1.0:
-        raise ValueError(f"Countdown reference is not gold-valid: numbers={numbers}, target={target}")
-    reference_expr = countdown_extract_expr(cleaned_files["solution.py"])
-    if reference_expr is None:
-        raise ValueError(f"Countdown reference is missing expr: numbers={numbers}, target={target}")
-    reference_json = json.dumps(
-        {
-            "solution.py": countdown_solution_py(numbers, target, reference_expr),
-            "test.py": COUNTDOWN_TEST_PY,
-        },
-        sort_keys=True,
-    )
-    return reference_json, reference_expr
+
+def countdown_rows(dataset) -> list[dict[str, Any]]:
+    rows = []
+    for example_id, row in enumerate(dataset):
+        numbers = [int(number) for number in row["nums"]]
+        target = int(row["target"])
+        reference = countdown_reference_from_row(row, numbers, target)
+        question = countdown_prompt(numbers, target)
+        rows.append(make_example(example_id, question, reference, info={"numbers": numbers, "target": target}))
+    return rows
 
 
 def load_countdown_source_datasets(dataset_name: str, split: str, seed: int) -> tuple[Dataset, Dataset | None]:
@@ -328,31 +271,14 @@ def build_countdown_code_datasets(
     if source_eval_dataset is not None and num_eval_examples is not None and len(source_eval_dataset) > num_eval_examples:
         source_eval_dataset = source_eval_dataset.select(range(num_eval_examples))
 
-    rows = []
-    for example_id, row in enumerate(dataset):
-        numbers = [int(number) for number in row["nums"]]
-        target = int(row["target"])
-        reference, reference_expr = countdown_verified_reference_from_row(row, numbers, target)
-        question = countdown_prompt(numbers, target)
-        rows.append(
-            make_example(example_id, question, reference, info={"numbers": numbers, "target": target})
-        )
+    rows = countdown_rows(dataset)
     if num_examples is None:
         return Dataset.from_list(rows), None
     train_rows = rows[:num_examples]
     if source_eval_dataset is None:
-        eval_source_rows = rows[num_examples : num_examples + (num_eval_examples or 0)]
+        eval_rows = rows[num_examples : num_examples + (num_eval_examples or 0)]
     else:
-        eval_source_rows = []
-        for eval_id, row in enumerate(source_eval_dataset):
-            numbers = [int(number) for number in row["nums"]]
-            target = int(row["target"])
-            reference, reference_expr = countdown_verified_reference_from_row(row, numbers, target)
-            question = countdown_prompt(numbers, target)
-            eval_source_rows.append(
-                make_example(eval_id, question, reference, info={"numbers": numbers, "target": target})
-            )
-    eval_rows = eval_source_rows[: num_eval_examples or 0]
+        eval_rows = countdown_rows(source_eval_dataset)[: num_eval_examples or 0]
     if num_eval_examples and len(eval_rows) < num_eval_examples:
         raise ValueError(
             f"Countdown-Code eval split requested {num_eval_examples} examples but only {len(eval_rows)} are available."
@@ -361,7 +287,7 @@ def build_countdown_code_datasets(
 
 
 class CountdownCodeGeneratorEnv(GeneratorEnv):
-    """Countdown-Code generator env, with proxy reward and gold-solution diagnostics."""
+    """Countdown-Code generator env; the proxy reward runs the submitted test file."""
 
     def __init__(
         self,
