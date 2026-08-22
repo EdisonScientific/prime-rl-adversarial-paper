@@ -82,9 +82,8 @@ name = "adversarial_judge"
 args = { kind = "judge" }
 
 [judge.trainer.loss]
-type = "binary_classifier"
-positive_token = "A"
-negative_token = "B"
+type = "default"
+kl_tau = 0.0
 
 [judge.trainer.model]
 fused_lm_head_token_chunk_size = "disabled"
