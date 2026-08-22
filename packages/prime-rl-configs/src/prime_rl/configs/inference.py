@@ -482,39 +482,6 @@ class InferenceConfig(BaseConfig):
     dry_run: bool = False
     """Only validate and dump resolved configs, then exit early."""
 
-    @model_validator(mode="before")
-    @classmethod
-    def fold_legacy_vllm_aliases(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-
-        vllm = data.setdefault("vllm", {})
-        if not isinstance(vllm, dict):
-            return data
-
-        legacy_model = data.pop("model", None)
-        if isinstance(legacy_model, dict):
-            vllm.update(legacy_model)
-
-        legacy_parallel = data.pop("parallel", None)
-        if isinstance(legacy_parallel, dict):
-            key_map = {
-                "tp": "tensor_parallel_size",
-                "dp": "data_parallel_size",
-                "dpl": "data_parallel_size_local",
-                "data_parallel_rpc_port": "data_parallel_rpc_port",
-                "enable_expert_parallel": "enable_expert_parallel",
-            }
-            for old_key, new_key in key_map.items():
-                if old_key in legacy_parallel and new_key not in vllm:
-                    vllm[new_key] = legacy_parallel[old_key]
-
-        for key in ("gpu_memory_utilization", "max_model_len", "reasoning_parser", "enable_return_routed_experts"):
-            if key in data and key not in vllm:
-                vllm[key] = data.pop(key)
-
-        return data
-
     @model_validator(mode="after")
     def validate_multi_node_requires_slurm(self):
         if self.deployment.type in ("multi_node", "disaggregated") and self.slurm is None:
@@ -634,10 +601,6 @@ class InferenceConfig(BaseConfig):
             # None extras are dropped too: `--vllm.foo None` means "use vLLM's default".
             if value is None and (key in self._OMIT_IF_NONE or key in extra_fields):
                 continue
-            if key == "reasoning_config" and isinstance(value, dict):
-                from vllm.config.reasoning import ReasoningConfig
-
-                value = ReasoningConfig(**value)
             setattr(namespace, key, value)
 
         # Auto tool choice is gated on a tool-call parser being resolved, unless

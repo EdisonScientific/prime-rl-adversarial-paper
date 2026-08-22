@@ -43,7 +43,7 @@ args = { kind = "generator", task = "multiplication", n_digits = 4, num_examples
 [generator.inference.server]
 port = 8000
 
-[generator.inference.model]
+[generator.inference.vllm]
 max_model_len = 4096
 
 [judge]
@@ -91,5 +91,5 @@ fused_lm_head_token_chunk_size = "disabled"
 [judge.inference.server]
 port = 8001
 
-[judge.inference.model]
+[judge.inference.vllm]
 max_model_len = 2048
