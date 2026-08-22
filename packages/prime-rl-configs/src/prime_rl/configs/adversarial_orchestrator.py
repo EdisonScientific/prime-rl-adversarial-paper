@@ -22,23 +22,18 @@ from prime_rl.utils.config import BaseConfig
 
 
 class EnvConfig(BaseConfig):
-    """A legacy-verifiers env (``id`` + kwargs for ``vf.load_environment``) — not the
-    verifiers.v1 ``configs.orchestrator.EnvConfig``. The Train/Eval config family below
-    forks with it; migrating the envs to v1 replaces all of them with upstream imports."""
+    """Legacy-verifiers env; the v1 migration replaces this family with upstream imports."""
 
     id: str = "prime_rl.adversarial.envs"
-    """Environment ID passed to ``vf.load_environment``; may carry an ``@version`` suffix."""
 
     name: str | None = None
-    """Display name; defaults to the ``id`` without ``@version``."""
 
     args: dict = {}
-    """Keyword arguments forwarded to ``vf.load_environment``."""
+    """Kwargs for ``vf.load_environment``."""
 
     @property
     def stripped_id(self) -> str:
-        """Environment ID without the @version suffix."""
-        return self.id.split("@")[0]
+            return self.id.split("@")[0]
 
     @property
     def resolved_name(self) -> str:
@@ -46,26 +41,20 @@ class EnvConfig(BaseConfig):
 
 class TrainConfig(BaseConfig):
     env: EnvConfig = EnvConfig()
-    """The role's single training environment."""
 
     sampling: TrainSamplingConfig = TrainSamplingConfig()
-    """Training sampling configuration."""
 
     max_retries: int = Field(3, ge=0)
-    """Retries for a failed rollout."""
 
 class EvalConfig(BaseConfig):
-    """Periodic generator eval on the env's held-out eval dataset (rolled out
-    with the train sampling args)."""
+    """Periodic generator eval on the env's eval dataset, using the train sampling args."""
 
     num_examples: int = -1
-    """Eval examples to sample from the dataset. ``-1`` uses all available examples."""
+    """``-1`` uses all available examples."""
 
     group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
-    """Rollouts generated per example."""
 
     interval: int = Field(100, ge=1)
-    """Step interval at which to evaluate the model."""
 
 
 WeightBroadcastConfig: TypeAlias = Annotated[
@@ -75,10 +64,8 @@ WeightBroadcastConfig: TypeAlias = Annotated[
 
 class OrchestratorConfig(BaseConfig):
     model: BaseModelConfig = BaseModelConfig()
-    """The model being trained (rollouts sample from its inference server)."""
 
     client: ClientConfig = ClientConfig()
-    """Client for the model's inference server."""
 
     train: TrainConfig = TrainConfig()
 
@@ -88,41 +75,32 @@ class OrchestratorConfig(BaseConfig):
     """Renderer that tokenizes rollouts; ``auto`` resolves from the tokenizer name."""
 
     eval: EvalConfig | None = None
-    """Evaluation configuration."""
 
     log: LogConfig = LogConfig()
 
     wandb: WandbMonitorConfig | None = None
 
     weight_broadcast: WeightBroadcastConfig = FileSystemWeightBroadcastConfig()
-    """Transport used to receive updated weights from the trainer."""
 
     rollout_transport: TransportConfig = FileSystemTransportConfig()
-    """Transport used to ship rollouts from orchestrator to trainer."""
 
     output_dir: Path = Path("outputs")
     """Root for this role's weights, rollouts, and logs; must match the trainer's."""
 
     batch_size: int | None = Field(None, ge=1)
-    """Samples to train on per step."""
 
     seed: int | None = None
-    """Dataset sampling seed for the synchronous adversarial loop."""
 
     pad_to_multiple_of: int = Field(1, ge=1)
-    """Pad packed microbatches to a multiple of this token count."""
 
     group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
     """Rollouts per example (the GRPO group)."""
 
     seq_len: int = 2048
-    """Training sequence length."""
 
     num_train_workers: int = Field(1, ge=1)
-    """Training workers to use."""
 
     max_steps: int | None = None
-    """Maximum training steps. If None, runs indefinitely."""
 
     @model_validator(mode="after")
     def auto_setup_tokenizer(self):
