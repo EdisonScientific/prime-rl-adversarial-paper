@@ -5,6 +5,7 @@ from statistics import fmean
 from typing import Any
 
 import verifiers as vf
+from renderers.base import create_renderer
 
 import prime_rl._compat  # noqa: F401
 import prime_rl.monitors as monitors
@@ -21,7 +22,7 @@ from prime_rl.transports.rollouts import setup_micro_batch_sender
 from prime_rl.transports.rollouts.types import TrainingSample
 from prime_rl.utils.client import InferencePool, init_nccl_broadcast
 from prime_rl.utils.config import cli
-from prime_rl.utils.logger import get_logger, setup_logger
+from prime_rl.utils.logger import setup_logger
 from prime_rl.utils.pathing import get_broadcast_dir, get_rollout_dir, get_step_path, wait_for_path
 from prime_rl.utils.process import set_proc_title
 from prime_rl.utils.utils import clean_exit
@@ -108,24 +109,6 @@ def require_config(config: AdversarialRLConfig) -> None:
             raise ValueError("adversarial resume_step must be lower than max_steps.")
 
 
-async def setup_student_inference_pool(*, config, tokenizer):
-    """Build the student inference pool + matching renderer."""
-    from renderers.base import create_renderer
-
-    client_config = config.student.client
-    model_name = config.student.model.name
-    renderer = create_renderer(tokenizer, config.renderer)
-    get_logger().info(f"Initialized {type(renderer).__name__} for {model_name}")
-    inference_pool = InferencePool(
-        client_config,
-        model_name=model_name,
-        train_client_type="renderer",
-        eval_client_type="openai_chat_completions",
-        renderer_config=config.renderer,
-    )
-    return renderer, inference_pool
-
-
 def legacy_train_client(orch) -> vf.ClientConfig:
     """Rollout client for the legacy verifiers envs. The upstream InferencePool
     builds verifiers.v1 client configs, which legacy ``run_rollout`` rejects."""
@@ -148,8 +131,15 @@ async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
     env_config = orch.train.env[0]
     env = vf.load_environment(env_config.stripped_id, **env_config.args)
     tokenizer = setup_tokenizer(orch.tokenizer)
-    renderer, inference_pool = await setup_student_inference_pool(config=orch, tokenizer=tokenizer)
     rollout_model_name = orch.student.model.name
+    renderer = create_renderer(tokenizer, orch.renderer)
+    inference_pool = InferencePool(
+        orch.student.client,
+        model_name=rollout_model_name,
+        train_client_type="renderer",
+        eval_client_type="openai_chat_completions",
+        renderer_config=orch.renderer,
+    )
     logger.info(f"Waiting for {name} inference pool")
     await inference_pool.wait_for_ready(rollout_model_name)
     logger.success(f"{name} inference pool ready")
@@ -298,6 +288,7 @@ async def score_and_build_judge_batch(
                 )
                 continue
 
+            # Unique judge example ids across steps/groups/rollouts (pair: generated, reference).
             base_id = step * 1_000_000 + group_idx * 10_000 + rollout_idx * 2
             generated_task_positions.append((rollout, result))
             judge_tasks.append(
@@ -326,6 +317,7 @@ async def score_and_build_judge_batch(
             )
 
     judge_rollouts = await asyncio.gather(*judge_tasks) if judge_tasks else []
+    # Tasks were appended in (generated, reference) pairs, so even slots are generated.
     generated_judge_rollouts = judge_rollouts[0::2]
     judge_env = judge.env
 
@@ -468,7 +460,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             wait_and_update(generator, start_step),
             wait_and_update(judge, start_step),
         )
-        examples = list(generator.env.get_dataset(seed=config.generator.orchestrator.buffer.seed))
+        examples = list(generator.env.get_dataset(seed=config.generator.orchestrator.seed))
         if not examples:
             raise ValueError("Generator dataset is empty")
         eval_config = config.generator.orchestrator.eval

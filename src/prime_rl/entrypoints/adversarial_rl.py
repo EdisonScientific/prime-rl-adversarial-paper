@@ -232,7 +232,6 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
     log_dir = get_log_dir(config.output_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     start_command = sys.argv
-    wandb_shared_env: dict[str, str] = {}
     processes: list[Popen] = []
     monitor_threads: list[Thread] = []
     error_queue: list[Exception] = []
@@ -293,7 +292,6 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
                 ],
                 log_dir / f"{role}_trainer.log",
                 {
-                    **wandb_shared_env,
                     "WANDB_SHARED_LABEL": f"{role}_trainer",
                     "CUDA_VISIBLE_DEVICES": ",".join(map(str, allocation[role]["trainer"])),
                     "PYTHONUNBUFFERED": "1",
@@ -317,7 +315,6 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
             ],
             log_dir / "adversarial_orchestrator.log",
             {
-                **wandb_shared_env,
                 "WANDB_SHARED_LABEL": "orchestrator",
                 "LOGURU_FORCE_COLORS": "1",
                 "WANDB_PROGRAM": "uv run adversarial-rl",

@@ -1,4 +1,3 @@
-import warnings
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias
 
@@ -30,9 +29,7 @@ class TrainSamplingConfig(BaseConfig):
     min_p: float | None = Field(None, ge=0)
     """Min-p sampling threshold. None defers to the inference server default."""
 
-    max_completion_tokens: int | None = Field(
-        None, validation_alias=AliasChoices("max_completion_tokens", "max_tokens")
-    )
+    max_completion_tokens: int | None = None
     """Maximum output tokens per turn. If None, generates until max context length or EOS."""
 
     # Strictly speaking, extra_body is not a sampling parameter, but it is the
@@ -60,19 +57,6 @@ class TrainSamplingConfig(BaseConfig):
             args["extra_body"] = extra_body
 
         return args
-
-    @model_validator(mode="before")
-    @classmethod
-    def _deprecate_max_tokens(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "max_tokens" in data and "max_completion_tokens" not in data:
-            warnings.warn(
-                "'max_tokens' is deprecated, use 'max_completion_tokens' instead. "
-                "Auto-translating for now, but this will be removed in a future release.",
-                FutureWarning,
-                stacklevel=2,
-            )
-        return data
-
 
 class EnvConfig(BaseConfig):
     id: str = "reverse-text"
@@ -207,11 +191,6 @@ class RolloutModelConfig(BaseConfig):
     client: LegacyClientConfig = LegacyClientConfig()
 
 
-class BufferConfig(BaseConfig):
-    seed: int | None = None
-    """Dataset sampling seed used by the synchronous adversarial loop."""
-
-
 class OrchestratorConfig(BaseConfig):
     student: RolloutModelConfig = Field(RolloutModelConfig(), validation_alias=AliasChoices("student", "model"))
     """Student rollout participant (model + client) — the model being trained."""
@@ -247,7 +226,8 @@ class OrchestratorConfig(BaseConfig):
     batch_size: int | None = Field(None, ge=1)
     """Samples to train on per step."""
 
-    buffer: BufferConfig = BufferConfig()
+    seed: int | None = None
+    """Dataset sampling seed for the synchronous adversarial loop."""
 
     pad_to_multiple_of: int = Field(1, ge=1)
     """Pad packed microbatches to a multiple of this token count."""
@@ -324,33 +304,6 @@ class OrchestratorConfig(BaseConfig):
             if flat:
                 student.setdefault("model", {}).update(flat)
 
-        return data
-
-    @model_validator(mode="before")
-    @classmethod
-    def _env_to_train(cls, data: Any) -> Any:
-        """Allow [[env]] and [sampling] as shorthand for [train] with [[train.env]] and [train.sampling]."""
-        if not isinstance(data, dict):
-            return data
-        if "env" in data or "sampling" in data:
-            train = data.setdefault("train", {})
-            if isinstance(train, dict):
-                if "env" in data:
-                    warnings.warn(
-                        "'[[orchestrator.env]]' is deprecated, use '[[orchestrator.train.env]]' instead. "
-                        "Auto-translating for now, but this will be removed in a future release.",
-                        FutureWarning,
-                        stacklevel=2,
-                    )
-                    train.setdefault("env", data.pop("env"))
-                if "sampling" in data:
-                    warnings.warn(
-                        "'[orchestrator.sampling]' is deprecated, use '[orchestrator.train.sampling]' instead. "
-                        "Auto-translating for now, but this will be removed in a future release.",
-                        FutureWarning,
-                        stacklevel=2,
-                    )
-                    train.setdefault("sampling", data.pop("sampling"))
         return data
 
     @model_validator(mode="after")
