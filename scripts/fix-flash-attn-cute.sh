@@ -14,7 +14,7 @@ echo "Reinstalling flash-attn-cute to fix namespace conflict with flash-attn..."
 uv pip install --reinstall --no-deps "flash-attn-4 @ git+https://github.com/Dao-AILab/flash-attention.git@96bd151#subdirectory=flash_attn/cute"
 
 # Verify installation
-LINES=$(wc -l < "$(uv run --no-sync python -c 'import flash_attn.cute.interface as m; print(m.__file__)')")
+LINES=$(wc -l < "$(python -c 'import flash_attn.cute.interface as m; print(m.__file__)')")
 if [ "$LINES" -gt 1000 ]; then
     echo "Success: flash-attn-cute interface.py has $LINES lines (correct version)"
 else
