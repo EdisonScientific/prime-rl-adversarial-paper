@@ -27,13 +27,13 @@ class EnvConfig(BaseConfig):
     forks with it; migrating the envs to v1 replaces all of them with upstream imports."""
 
     id: str = "prime_rl.adversarial.envs"
-    """Registered verifiers environment ID (e.g. ``math-env``, ``primeintellect/math-env``). May include an ``@version`` suffix for installation."""
+    """Environment ID passed to ``vf.load_environment``; may carry an ``@version`` suffix."""
 
     name: str | None = None
-    """Display name for this environment in logs, metrics, and buffer keys. Defaults to the ``id`` without ``@version``. Must be unique across all envs in the same group."""
+    """Display name; defaults to the ``id`` without ``@version``."""
 
     args: dict = {}
-    """Keyword arguments forwarded to ``vf.load_environment``. See the environment's docstring for accepted args."""
+    """Keyword arguments forwarded to ``vf.load_environment``."""
 
     @property
     def stripped_id(self) -> str:
@@ -85,10 +85,7 @@ class OrchestratorConfig(BaseConfig):
     tokenizer: TokenizerConfig = TokenizerConfig()
 
     renderer: RendererConfig = AutoRendererConfig()
-    """Typed renderer config (``renderers.RendererConfig`` discriminated
-    union), required — rollouts are tokenized through the renderer. Defaults
-    to ``"auto"``, which resolves from ``tokenizer.name_or_path`` via
-    ``MODEL_RENDERER_MAP``."""
+    """Renderer that tokenizes rollouts; ``auto`` resolves from the tokenizer name."""
 
     eval: EvalConfig | None = None
     """Evaluation configuration."""
@@ -104,7 +101,7 @@ class OrchestratorConfig(BaseConfig):
     """Transport used to ship rollouts from orchestrator to trainer."""
 
     output_dir: Path = Path("outputs")
-    """Directory to write outputs to — checkpoints, weights, rollouts, and logs are written as subdirectories. Should be a persistent directory with enough disk space and unique per experiment running on a single node."""
+    """Root for this role's weights, rollouts, and logs; must match the trainer's."""
 
     batch_size: int | None = Field(None, ge=1)
     """Samples to train on per step."""
@@ -116,10 +113,10 @@ class OrchestratorConfig(BaseConfig):
     """Pad packed microbatches to a multiple of this token count."""
 
     group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
-    """Output sequences returned per example during training."""
+    """Rollouts per example (the GRPO group)."""
 
     seq_len: int = 2048
-    """Training sequence length. Shorter samples are padded; longer samples are truncated."""
+    """Training sequence length."""
 
     num_train_workers: int = Field(1, ge=1)
     """Training workers to use."""
@@ -137,43 +134,24 @@ class OrchestratorConfig(BaseConfig):
 
     @model_validator(mode="after")
     def auto_setup_session_headers(self):
-        """Ensure X-Session-ID header is always set for sticky DP-aware routing at the inference router."""
+        """Sticky DP-aware routing at the inference router."""
         self.client.extra_headers_from_state.setdefault("X-Session-ID", "trajectory_id")
         return self
 
     @model_validator(mode="after")
     def validate_renderer_auto_resolves(self):
-        """Reject the silent DefaultRenderer fallback at config time.
-
-        When ``renderer.name='auto'`` and the model isn't in
-        ``MODEL_RENDERER_MAP``, ``create_renderer`` would fall back to
-        ``DefaultRenderer``. That fallback doesn't fix the
-        position-dependent chat-template bug the renderer client exists
-        to solve, and rejects envs that pass tools (the rollout dies
-        with "RendererPool does not support tools") unless
-        ``DefaultRendererConfig.tool_parser`` is configured. Surface at
-        config time so ``--dry-run`` reports the error.
-        """
+        """Reject the silent DefaultRenderer fallback at config time."""
         if self.renderer.name != "auto":
             return self
         from renderers.base import MODEL_RENDERER_MAP
 
         model_id = self.tokenizer.name or self.model.name
-        if model_id in MODEL_RENDERER_MAP:
-            return self
-        raise ValueError(
-            f"orchestrator.renderer.name='auto' but "
-            f"{model_id!r} is not in renderers.base.MODEL_RENDERER_MAP, so it "
-            f"would silently fall back to DefaultRenderer. Pick one: "
-            f"(a) [orchestrator.renderer] name='default' — for fine-tunes / "
-            f"vendored mirrors with custom chat templates (DefaultRenderer "
-            f"calls apply_chat_template); set tool_parser=<name> if the env "
-            f"uses tools. "
-            f"(b) [orchestrator.renderer] name=<model-specific renderer> — "
-            f"if {model_id!r} is template-identical to a mapped family "
-            f"(and ideally also add it upstream to "
-            f"renderers.base.MODEL_RENDERER_MAP)."
-        )
+        if model_id not in MODEL_RENDERER_MAP:
+            raise ValueError(
+                f"renderer 'auto' cannot resolve {model_id!r} (not in renderers.base.MODEL_RENDERER_MAP); "
+                f"set [orchestrator.renderer] name='default' or a model-specific renderer explicitly."
+            )
+        return self
 
     @model_validator(mode="after")
     def resolve_batching(self):
