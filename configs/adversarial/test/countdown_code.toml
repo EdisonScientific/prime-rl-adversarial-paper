@@ -33,7 +33,7 @@ base_url = ["http://localhost:8000/v1"]
 [generator.orchestrator.train.sampling]
 temperature = 1.0
 max_completion_tokens = 2048
-extra_body = { top_k = 20, min_p = 0.0, chat_template_kwargs = { enable_thinking = true } }
+extra_body = { chat_template_kwargs = { enable_thinking = true } }
 
 [[generator.orchestrator.train.env]]
 id = "prime_rl.adversarial.envs"
