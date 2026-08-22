@@ -82,8 +82,6 @@ def require_config(config: AdversarialRLConfig) -> None:
         raise ValueError("the synchronous prototype supports filesystem or NCCL weight broadcast.")
     if gen.rollout_transport.type != "filesystem" or judge.rollout_transport.type != "filesystem":
         raise ValueError("the synchronous prototype currently supports only filesystem rollout transport.")
-    if len(gen.train.env) != 1 or len(judge.train.env) != 1:
-        raise ValueError("configure exactly one generator env and one judge env.")
     if gen.batch_size is None or judge.batch_size is None:
         raise ValueError("generator and judge batch_size are required.")
     if gen.batch_size % gen.group_size != 0:
@@ -128,7 +126,7 @@ def legacy_train_client(orch) -> vf.ClientConfig:
 async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
     logger = setup_logger(config.log.level or "info", json_logging=config.log.json_logging)
     orch = config.orchestrator
-    env_config = orch.train.env[0]
+    env_config = orch.train.env
     env = vf.load_environment(env_config.stripped_id, **env_config.args)
     tokenizer = setup_tokenizer(orch.tokenizer)
     rollout_model_name = orch.model.name
@@ -158,8 +156,8 @@ async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
         config=config,
         env=env,
         env_name=env_config.resolved_name,
-        sampling_args=env_config.sampling.to_sampling_args(),
-        max_retries=env_config.max_retries,
+        sampling_args=orch.train.sampling.to_sampling_args(),
+        max_retries=orch.train.max_retries,
         tokenizer=tokenizer,
         renderer=renderer,
         inference_pool=inference_pool,
@@ -441,7 +439,6 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
     logger.info("Starting synchronous adversarial prototype")
     await monitors.setup(
         wandb=config.generator.orchestrator.wandb,
-        prime=config.generator.orchestrator.prime_monitor,
         output_dir=config.output_dir,
         run_config=config,
     )

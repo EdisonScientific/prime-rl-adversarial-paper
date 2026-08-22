@@ -1,10 +1,10 @@
 from pathlib import Path
-from typing import Annotated, Any, TypeAlias
+from typing import Annotated, TypeAlias
 
 from pydantic import AliasChoices, Field, model_validator
 from renderers import AutoRendererConfig, RendererConfig
 
-from prime_rl.configs.monitors import PrimeMonitorConfig, WandbMonitorConfig
+from prime_rl.configs.monitors import WandbMonitorConfig
 from prime_rl.configs.orchestrator import (
     FileSystemWeightBroadcastConfig,
     NCCLWeightBroadcastConfig,
@@ -26,7 +26,7 @@ class EnvConfig(BaseConfig):
     verifiers.v1 ``configs.orchestrator.EnvConfig``. The Train/Eval config family below
     forks with it; migrating the envs to v1 replaces all of them with upstream imports."""
 
-    id: str = "reverse-text"
+    id: str = "prime_rl.adversarial.envs"
     """Registered verifiers environment ID (e.g. ``math-env``, ``primeintellect/math-env``). May include an ``@version`` suffix for installation."""
 
     name: str | None = None
@@ -34,9 +34,6 @@ class EnvConfig(BaseConfig):
 
     args: dict = {}
     """Keyword arguments forwarded to ``vf.load_environment``. See the environment's docstring for accepted args."""
-
-    max_retries: int = Field(3, ge=0)
-    """Times the env server retries a failed rollout before returning an error."""
 
     @property
     def stripped_id(self) -> str:
@@ -47,56 +44,15 @@ class EnvConfig(BaseConfig):
     def resolved_name(self) -> str:
         return self.name or self.stripped_id
 
-    @model_validator(mode="after")
-    def validate_env_name(self):
-        if self.resolved_name == "all":
-            raise ValueError(
-                'Environment name "all" is reserved for global metric aggregation. Use a different name or id.'
-            )
-        return self
-
-class TrainEnvConfig(EnvConfig):
-    sampling: TrainSamplingConfig = TrainSamplingConfig()
-    """Per-env sampling overrides. Unset fields inherit from the group-level train sampling config."""
-
-    group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
-    """Rollouts generated per example for GRPO group-relative advantages.
-    Inherits from ``orchestrator.group_size`` when unset."""
-
-
 class TrainConfig(BaseConfig):
-    env: list[TrainEnvConfig] = [TrainEnvConfig()]
-    """Training environments."""
+    env: EnvConfig = EnvConfig()
+    """The role's single training environment."""
 
     sampling: TrainSamplingConfig = TrainSamplingConfig()
-    """Shared training sampling configuration."""
+    """Training sampling configuration."""
 
     max_retries: int = Field(3, ge=0)
-    """Default retries for failed rollouts. Can be overridden per env."""
-
-    @model_validator(mode="after")
-    def resolve_env_defaults(self):
-        """Resolve per-env overrides: inherit group-level sampling and max_retries."""
-        group_sampling = self.sampling.model_dump()
-        for env in self.env:
-            if "sampling" not in env.model_fields_set:
-                env.sampling = TrainSamplingConfig(**group_sampling)
-            else:
-                merged = group_sampling | env.sampling.model_dump(exclude_unset=True)
-                env.sampling = TrainSamplingConfig(**merged)
-            if "max_retries" not in env.model_fields_set:
-                env.max_retries = self.max_retries
-        return self
-
-    @model_validator(mode="after")
-    def validate_unique_env_names(self):
-        env_names = [env.resolved_name for env in self.env]
-        duplicates = [n for n in env_names if env_names.count(n) > 1]
-        if duplicates:
-            raise ValueError(
-                f"Duplicate training environment names: {set(duplicates)}. Each env must have a unique name."
-            )
-        return self
+    """Retries for a failed rollout."""
 
 class EvalConfig(BaseConfig):
     """Periodic generator eval on the env's held-out eval dataset (rolled out
@@ -117,23 +73,11 @@ WeightBroadcastConfig: TypeAlias = Annotated[
 ]
 
 
-class LegacyClientConfig(ClientConfig):
-    @model_validator(mode="before")
-    @classmethod
-    def accept_singleton_base_url_lists(cls, data: Any) -> Any:
-        if isinstance(data, dict) and isinstance(data.get("base_url"), list):
-            urls = data["base_url"]
-            if len(urls) != 1:
-                raise ValueError("adversarial client.base_url must contain exactly one URL when passed as a list.")
-            data = {**data, "base_url": urls[0]}
-        return data
-
-
 class OrchestratorConfig(BaseConfig):
     model: BaseModelConfig = BaseModelConfig()
     """The model being trained (rollouts sample from its inference server)."""
 
-    client: LegacyClientConfig = LegacyClientConfig()
+    client: ClientConfig = ClientConfig()
     """Client for the model's inference server."""
 
     train: TrainConfig = TrainConfig()
@@ -153,15 +97,13 @@ class OrchestratorConfig(BaseConfig):
 
     wandb: WandbMonitorConfig | None = None
 
-    prime_monitor: PrimeMonitorConfig | None = None
-
     weight_broadcast: WeightBroadcastConfig = FileSystemWeightBroadcastConfig()
     """Transport used to receive updated weights from the trainer."""
 
     rollout_transport: TransportConfig = FileSystemTransportConfig()
     """Transport used to ship rollouts from orchestrator to trainer."""
 
-    output_dir: Path = Path("outputs/run_default")
+    output_dir: Path = Path("outputs")
     """Directory to write outputs to — checkpoints, weights, rollouts, and logs are written as subdirectories. Should be a persistent directory with enough disk space and unique per experiment running on a single node."""
 
     batch_size: int | None = Field(None, ge=1)
@@ -179,7 +121,6 @@ class OrchestratorConfig(BaseConfig):
     seq_len: int = 2048
     """Training sequence length. Shorter samples are padded; longer samples are truncated."""
 
-    # TODO(Mika): This should be automatic from the number of ZMQ connections
     num_train_workers: int = Field(1, ge=1)
     """Training workers to use."""
 
@@ -198,16 +139,6 @@ class OrchestratorConfig(BaseConfig):
     def auto_setup_session_headers(self):
         """Ensure X-Session-ID header is always set for sticky DP-aware routing at the inference router."""
         self.client.extra_headers_from_state.setdefault("X-Session-ID", "trajectory_id")
-        return self
-
-    @model_validator(mode="after")
-    def auto_setup_prime_monitor_run_name(self):
-        """Default ``prime_monitor.name`` to the W&B run name when monitoring
-        is enabled and the user hasn't named the prime-monitor run explicitly."""
-        if self.prime_monitor is None or self.prime_monitor.name is not None:
-            return self
-        if self.wandb is not None and self.wandb.name:
-            self.prime_monitor.name = self.wandb.name
         return self
 
     @model_validator(mode="after")
@@ -246,23 +177,15 @@ class OrchestratorConfig(BaseConfig):
 
     @model_validator(mode="after")
     def resolve_batching(self):
-        if self.batch_size is None:
-            self.batch_size = 128
-        if self.batch_size % self.group_size != 0:
+        if self.batch_size is not None and self.batch_size % self.group_size != 0:
             raise ValueError("Batch size must be divisible by the number of samples per problem")
-
-        # Propagate the top-level ``group_size`` into each train env that didn't set its own.
-        for env_cfg in self.train.env:
-            if "group_size" not in env_cfg.model_fields_set:
-                env_cfg.group_size = self.group_size
-
         return self
 
     @model_validator(mode="after")
-    def resolve_env_config(self):
-        """Populate vLLM sampling defaults on each train env."""
-        for env in self.train.env:
-            env.sampling.extra_body.setdefault("top_k", -1)
-            env.sampling.extra_body.setdefault("min_p", 0.0)
-            env.sampling.extra_body.setdefault("return_token_ids", True)
+    def resolve_sampling_defaults(self):
+        """Populate vLLM sampling defaults (top_k/min_p disabled, token ids returned)."""
+        extra_body = self.train.sampling.extra_body
+        extra_body.setdefault("top_k", -1)
+        extra_body.setdefault("min_p", 0.0)
+        extra_body.setdefault("return_token_ids", True)
         return self
