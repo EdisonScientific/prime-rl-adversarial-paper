@@ -22,6 +22,9 @@ from prime_rl.utils.config import BaseConfig
 
 
 class EnvConfig(BaseConfig):
+    """A legacy-verifiers env (``id`` + kwargs for ``vf.load_environment``) — not the
+    verifiers.v1 ``configs.orchestrator.EnvConfig``; migrating the envs to v1 replaces this."""
+
     id: str = "reverse-text"
     """Registered verifiers environment ID (e.g. ``math-env``, ``primeintellect/math-env``). May include an ``@version`` suffix for installation."""
 
