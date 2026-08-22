@@ -94,7 +94,7 @@ class AdversarialRoleConfig(BaseConfig):
     def resolve_shared_fields(self):
         if self.model is not None:
             self.trainer.model.name = self.model.name
-            self.orchestrator.student.model.name = self.model.name
+            self.orchestrator.model.name = self.model.name
             if self.inference is not None:
                 self.inference.vllm.model = self.model.name
         if self.tokenizer is not None:

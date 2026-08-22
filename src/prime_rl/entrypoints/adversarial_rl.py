@@ -141,7 +141,7 @@ def apply_role_hosts(config: AdversarialRLConfig, allocation: dict[str, dict[str
         inference_node = allocation[role]["inference_node"]
         if run.inference is not None:
             host = inference_node or "localhost"
-            run.orchestrator.student.client.base_url = f"http://{host}:{run.inference.server.port}/v1"
+            run.orchestrator.client.base_url = f"http://{host}:{run.inference.server.port}/v1"
 
         trainer_nodes = allocation[role]["trainer_nodes"]
         if run.trainer.weight_broadcast.type == "nccl":

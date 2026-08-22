@@ -1,10 +1,15 @@
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Any, TypeAlias
 
 from pydantic import AliasChoices, Field, model_validator
 from renderers import AutoRendererConfig, RendererConfig
 
 from prime_rl.configs.monitors import PrimeMonitorConfig, WandbMonitorConfig
+from prime_rl.configs.orchestrator import (
+    FileSystemWeightBroadcastConfig,
+    NCCLWeightBroadcastConfig,
+    TrainSamplingConfig,
+)
 from prime_rl.configs.shared import (
     BaseModelConfig,
     ClientConfig,
@@ -15,48 +20,6 @@ from prime_rl.configs.shared import (
 from prime_rl.configs.trainer import TokenizerConfig
 from prime_rl.utils.config import BaseConfig
 
-
-class TrainSamplingConfig(BaseConfig):
-    temperature: float = Field(1.0, ge=0)
-    """Sampling temperature."""
-
-    top_p: float | None = None
-    """Nucleus sampling threshold. None defers to the inference server default."""
-
-    top_k: int | None = None
-    """Top-k sampling. None defers to the inference server default."""
-
-    min_p: float | None = Field(None, ge=0)
-    """Min-p sampling threshold. None defers to the inference server default."""
-
-    max_completion_tokens: int | None = None
-    """Maximum output tokens per turn. If None, generates until max context length or EOS."""
-
-    # Strictly speaking, extra_body is not a sampling parameter, but it is the
-    # easiest way to pass arbitrary extra parameters to the server via verifiers
-    extra_body: dict[str, Any] = {}
-    """Extra body forwarded with each request to the inference server."""
-
-    def to_sampling_args(self) -> dict[str, Any]:
-        """Convert to OAI-compatible sampling args dict, omitting None values."""
-        args: dict[str, Any] = {
-            "temperature": self.temperature,
-            "logprobs": True,
-        }
-        if self.top_p is not None:
-            args["top_p"] = self.top_p
-        if self.max_completion_tokens is not None:
-            args["max_completion_tokens"] = self.max_completion_tokens
-
-        extra_body = dict(self.extra_body)
-        if self.top_k is not None:
-            extra_body["top_k"] = self.top_k
-        if self.min_p is not None:
-            extra_body["min_p"] = self.min_p
-        if extra_body:
-            args["extra_body"] = extra_body
-
-        return args
 
 class EnvConfig(BaseConfig):
     id: str = "reverse-text"
@@ -145,29 +108,6 @@ class EvalConfig(BaseConfig):
     """Step interval at which to evaluate the model."""
 
 
-class FileSystemWeightBroadcastConfig(BaseConfig):
-    type: Literal["filesystem"] = "filesystem"
-
-
-class NCCLWeightBroadcastConfig(BaseConfig):
-    type: Literal["nccl"] = "nccl"
-
-    host: str = "localhost"
-    """Host for the NCCL broadcast rendezvous."""
-
-    port: int = 29501
-    """Port for the NCCL broadcast rendezvous."""
-
-    timeout: int = 1200
-    """Timeout in seconds for the NCCL broadcast."""
-
-    quantize_in_weight_transfer: bool = False
-    """Use kernel-format FP8 quantized NCCL transfer for weight updates."""
-
-    inference_world_size: int = Field(1, ge=1)
-    """Total inference GPUs across all servers. Used by ``init_nccl_broadcast`` to compute per-server rank offsets."""
-
-
 WeightBroadcastConfig: TypeAlias = Annotated[
     FileSystemWeightBroadcastConfig | NCCLWeightBroadcastConfig, Field(discriminator="type")
 ]
@@ -185,15 +125,12 @@ class LegacyClientConfig(ClientConfig):
         return data
 
 
-class RolloutModelConfig(BaseConfig):
+class OrchestratorConfig(BaseConfig):
     model: BaseModelConfig = BaseModelConfig()
+    """The model being trained (rollouts sample from its inference server)."""
 
     client: LegacyClientConfig = LegacyClientConfig()
-
-
-class OrchestratorConfig(BaseConfig):
-    student: RolloutModelConfig = Field(RolloutModelConfig(), validation_alias=AliasChoices("student", "model"))
-    """Student rollout participant (model + client) — the model being trained."""
+    """Client for the model's inference server."""
 
     train: TrainConfig = TrainConfig()
 
@@ -245,79 +182,18 @@ class OrchestratorConfig(BaseConfig):
     max_steps: int | None = None
     """Maximum training steps. If None, runs indefinitely."""
 
-    @property
-    def model(self) -> BaseModelConfig:
-        return self.student.model
-
-    @model_validator(mode="before")
-    @classmethod
-    def fold_student_shortcuts(cls, data: Any) -> Any:
-        """Accept top-level ``[orchestrator.model]`` / ``[orchestrator.client]``
-        as shorthand for the student sub-config. Useful for ergonomic rl configs
-        where ``[orchestrator.student.*]`` is overkill, and required for
-        pre-refactor configs that used the flat layout to keep parsing:
-
-        - [orchestrator.client.*]     -> [orchestrator.student.client.*]
-        - [orchestrator.model.<k>]    -> [orchestrator.student.model.<k>]
-          (where <k> is any model config field)
-        """
-        if not isinstance(data, dict):
-            return data
-
-        def deep_merge(dst: dict, src: dict) -> None:
-            """In-place recursive merge of ``src`` into ``dst``. ``src`` wins at the leaf."""
-            for k, v in src.items():
-                if isinstance(v, dict) and isinstance(dst.get(k), dict):
-                    deep_merge(dst[k], v)
-                else:
-                    dst[k] = v
-
-        # 1. Re-nest top-level [orchestrator.client] under student.client.
-        legacy_client = data.pop("client", None)
-        if isinstance(legacy_client, dict):
-            student = data.setdefault("student", {})
-            if isinstance(student, dict):
-                deep_merge(student.setdefault("client", {}), legacy_client)
-            else:
-                # Mismatched types - put it back and let pydantic surface the error.
-                data["client"] = legacy_client
-
-        # 2. Consolidate the legacy `model` alias into `student` so the
-        # flat-layout fix-up below sees a single target. Deep-merge with the
-        # legacy keys winning so a CLI `--model.<k>` overrides TOML `student.model.<k>`.
-        legacy_model = data.pop("model", None)
-        if legacy_model is not None:
-            existing = data.get("student")
-            if existing is None:
-                data["student"] = legacy_model
-            elif isinstance(existing, dict) and isinstance(legacy_model, dict):
-                deep_merge(existing, legacy_model)
-            else:
-                # Mismatched types - put it back and let pydantic surface the error.
-                data["model"] = legacy_model
-
-        # 3. Re-nest flat model keys under student.model.
-        model_only_keys = set(BaseModelConfig.model_fields)
-        student = data.get("student")
-        if isinstance(student, dict):
-            flat = {k: student.pop(k) for k in list(student) if k in model_only_keys}
-            if flat:
-                student.setdefault("model", {}).update(flat)
-
-        return data
-
     @model_validator(mode="after")
     def auto_setup_tokenizer(self):
         if self.tokenizer.name is None:
-            self.tokenizer.name = self.student.model.name
+            self.tokenizer.name = self.model.name
         if self.tokenizer.trust_remote_code is None:
-            self.tokenizer.trust_remote_code = self.student.model.trust_remote_code
+            self.tokenizer.trust_remote_code = self.model.trust_remote_code
         return self
 
     @model_validator(mode="after")
     def auto_setup_session_headers(self):
         """Ensure X-Session-ID header is always set for sticky DP-aware routing at the inference router."""
-        self.student.client.extra_headers_from_state.setdefault("X-Session-ID", "trajectory_id")
+        self.client.extra_headers_from_state.setdefault("X-Session-ID", "trajectory_id")
         return self
 
     @model_validator(mode="after")
@@ -347,7 +223,7 @@ class OrchestratorConfig(BaseConfig):
             return self
         from renderers.base import MODEL_RENDERER_MAP
 
-        model_id = self.tokenizer.name or self.student.model.name
+        model_id = self.tokenizer.name or self.model.name
         if model_id in MODEL_RENDERER_MAP:
             return self
         raise ValueError(
