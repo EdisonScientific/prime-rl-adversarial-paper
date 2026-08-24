@@ -1,0 +1,22 @@
+# Overlay: pairwise judging (stack on an env config, e.g. `@ multiplication.toml @ pairwise.toml`).
+# Also moves to ports 8002/8003 so a pairwise run can share a node with a
+# single-candidate run (see smoke_pair.sbatch).
+judge_objective = "pairwise"
+
+[generator.orchestrator.client]
+base_url = "http://localhost:8002/v1"
+
+[generator.inference.server]
+port = 8002
+
+[judge.orchestrator]
+batch_size = 128
+
+[judge.orchestrator.train.env]
+args = { pairwise = true }
+
+[judge.orchestrator.client]
+base_url = "http://localhost:8003/v1"
+
+[judge.inference.server]
+port = 8003

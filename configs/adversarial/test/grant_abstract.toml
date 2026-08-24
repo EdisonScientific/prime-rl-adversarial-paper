@@ -1,95 +1,9 @@
+# Env overlay: NIH grant abstracts (stack on base.toml).
+# The dataset path points at the prepared JSONL on the cluster.
 output_dir = "outputs/adversarial-test-grant-abstract"
-generator_reward_mode = "judge"
-
-[generator]
-max_steps = 100
-seq_len = 4096
-
-[generator.model]
-name = "Qwen/Qwen3-0.6B"
 
 [generator.wandb]
-project = "testing-adversarial"
 name = "adversarial-test-grant-abstract"
 
-[generator.weight_broadcast]
-type = "nccl"
-port = 29541
-timeout = 3600
-
-[generator.deployment]
-type = "single_node"
-gpus_per_node = 4
-num_infer_gpus = 1
-num_train_gpus = 1
-
-[generator.orchestrator]
-batch_size = 32
-rollouts_per_example = 4
-
-[generator.orchestrator.client]
-base_url = "http://localhost:8000/v1"
-
-[generator.orchestrator.train.sampling]
-temperature = 1.0
-max_completion_tokens = 1024
-extra_body = { chat_template_kwargs = { enable_thinking = true } }
-
 [generator.orchestrator.train.env]
-id = "prime_rl.adversarial.envs"
-name = "adversarial_generator"
-args = { kind = "generator", task = "grant_abstract", dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_train_excl_eval128_seed1_cleanv1.jsonl", num_examples = 256, seed = 1 }
-
-[generator.inference.server]
-port = 8000
-
-[generator.inference.vllm]
-max_model_len = 4096
-
-[judge]
-max_steps = 100
-seq_len = 2048
-
-[judge.model]
-name = "Qwen/Qwen3-0.6B"
-
-[judge.weight_broadcast]
-type = "nccl"
-port = 29542
-timeout = 3600
-
-[judge.deployment]
-type = "single_node"
-gpus_per_node = 4
-num_infer_gpus = 1
-num_train_gpus = 1
-
-[judge.orchestrator]
-batch_size = 64
-rollouts_per_example = 1
-
-[judge.orchestrator.client]
-base_url = "http://localhost:8001/v1"
-
-[judge.orchestrator.train.sampling]
-temperature = 0.0
-max_completion_tokens = 1
-extra_body = { chat_template_kwargs = { enable_thinking = false }, structured_outputs = { choice = ["A", "B"] } }
-
-[judge.orchestrator.train.env]
-id = "prime_rl.adversarial.envs"
-name = "adversarial_judge"
-args = { kind = "judge" }
-
-[judge.trainer.loss]
-type = "default"
-kl_tau = 0.0
-
-[judge.trainer.model]
-fused_lm_head_token_chunk_size = "disabled"
-
-[judge.inference.server]
-port = 8001
-
-[judge.inference.vllm]
-max_model_len = 2048
+args = { task = "grant_abstract", dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_train_excl_eval128_seed1_cleanv1.jsonl", num_examples = 256 }
