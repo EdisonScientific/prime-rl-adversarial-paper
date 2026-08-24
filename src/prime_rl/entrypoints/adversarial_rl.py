@@ -216,10 +216,9 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
         clean_future_steps(role_config.output_dir, resume_step)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    # The orchestrator and the generator trainer share one W&B run (wandb shared
-    # mode); the judge trainer stays muted — the orchestrator logs the watched
-    # judge metrics. The run id persists in the output dir so resumed runs
-    # continue the same W&B run.
+    # The orchestrator and the generator trainer share one W&B run; the judge
+    # trainer is muted (the orchestrator logs the judge metrics). The persisted
+    # run id makes resumed runs continue the same W&B run.
     run_id_file = config.output_dir / "wandb_run_id"
     if not run_id_file.exists():
         run_id_file.write_text(uuid.uuid4().hex)

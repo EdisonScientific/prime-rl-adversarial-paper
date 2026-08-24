@@ -104,9 +104,7 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         files = countdown_load_json_from_response(completion)
         candidate = None if files is None else json.dumps(files, sort_keys=True)
-        # Proxy reward: run the submitted solution against the submitted test in a
-        # subprocess; 1.0 when the test passes, 0.2 for well-formed but failing
-        # or timing-out submissions, 0.0 for unparseable ones.
+        # 1.0 when the submitted test passes, 0.2 for well-formed but failing, 0.0 for unparseable.
         if files is None:
             reward = 0.0
         else:

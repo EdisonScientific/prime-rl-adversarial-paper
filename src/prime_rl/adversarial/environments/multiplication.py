@@ -25,7 +25,7 @@ Stop immediately after the closing answer tag.
 
 
 class MultiplicationGeneratorEnv(GeneratorEnv):
-    """Four-digit multiplication env used by the adversarial experiments."""
+    """Seeded n-digit multiplication; the verifiable reward is exact-product match."""
 
     judge_task_label = "Problem"
 
@@ -37,7 +37,6 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
         seed: int = 0,
         **_: Any,
     ):
-        # Sample n-digit factor pairs; the eval split is held out of the same draw.
         total = num_examples + (num_eval_examples or 0)
         rng = random.Random(seed)
         low = 0 if n_digits == 1 else 10 ** (n_digits - 1)
@@ -56,7 +55,6 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
         )
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
-        # Raw answer text: the judge sees exactly what the generator wrote.
         answer = extract_answer(completion)
         if answer is None or not INTEGER_RE.fullmatch(answer.strip()):
             return None

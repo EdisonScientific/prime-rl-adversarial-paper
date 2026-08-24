@@ -31,7 +31,8 @@ def formula_atom_counts(formula: str) -> Counter[str]:
 
 
 class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
-    """Ether0 diagnostic env: compute molecular formulas from reference SMILES."""
+    """SMILES-to-molecular-formula over the prepared ether0 dataset; the verifiable
+    reward is zero L1 atom-count distance to the target formula."""
 
     judge_task_label = "Chemistry question"
     judge_candidate_label = "Candidate molecular formula"
@@ -43,8 +44,6 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
         num_eval_examples: int | None = None,
         **_: Any,
     ):
-        # Prepared parquet splits; None takes a full split. The rows are rebuilt so
-        # the env's own system prompt applies instead of the one baked into the data.
         source = load_dataset("parquet", data_dir=f"{dataset_path}/data")
 
         def rows(split, limit: int | None) -> list[dict[str, Any]]:
@@ -59,7 +58,6 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
         )
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
-        # Raw answer text: the judge sees exactly what the generator wrote.
         return extract_answer(completion) or None
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
