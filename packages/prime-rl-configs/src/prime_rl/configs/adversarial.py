@@ -3,37 +3,17 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from prime_rl.configs.adversarial_orchestrator import (
-    FileSystemWeightBroadcastConfig as AdversarialOrchestratorFileSystemWeightBroadcastConfig,
-)
-from prime_rl.configs.adversarial_orchestrator import (
-    NCCLWeightBroadcastConfig as AdversarialOrchestratorNCCLWeightBroadcastConfig,
-)
 from prime_rl.configs.adversarial_orchestrator import OrchestratorConfig as AdversarialOrchestratorConfig
 from prime_rl.configs.inference import InferenceConfig
 from prime_rl.configs.monitors import WandbMonitorConfig
 from prime_rl.configs.rl import (
     DeploymentConfig,
-    SharedFileSystemWeightBroadcastConfig,
     SharedLogConfig,
     SharedModelConfig,
-    SharedNCCLWeightBroadcastConfig,
-    SharedNIXLWeightBroadcastConfig,
-    SharedWeightBroadcastConfig,
     SingleNodeDeploymentConfig,
 )
-from prime_rl.configs.shared import ResumeConfig, TransportConfig
-from prime_rl.configs.trainer import CheckpointConfig as TrainerCheckpointConfig
-from prime_rl.configs.trainer import (
-    FileSystemWeightBroadcastConfig as TrainerFileSystemWeightBroadcastConfig,
-)
-from prime_rl.configs.trainer import (
-    NCCLWeightBroadcastConfig as TrainerNCCLWeightBroadcastConfig,
-)
-from prime_rl.configs.trainer import (
-    NIXLWeightBroadcastConfig as TrainerNIXLWeightBroadcastConfig,
-)
-from prime_rl.configs.trainer import TokenizerConfig, TrainerConfig
+from prime_rl.configs.shared import TransportConfig
+from prime_rl.configs.trainer import TrainerConfig
 from prime_rl.utils.config import BaseConfig
 
 
@@ -59,18 +39,11 @@ class AdversarialRoleConfig(BaseConfig):
     model: SharedModelConfig | None = Field(
         None, description="Shared model name, propagated to trainer, orchestrator, and inference."
     )
-    tokenizer: TokenizerConfig | None = Field(
-        None, description="Shared tokenizer, propagated to trainer and orchestrator."
-    )
     max_steps: int | None = Field(None, description="Shared step budget, propagated to trainer and orchestrator.")
     seq_len: int | None = Field(None, description="Shared sequence length, propagated to trainer and orchestrator.")
-    weight_broadcast: SharedWeightBroadcastConfig | None = Field(
-        None, description="Shared weight-broadcast transport, propagated to trainer, orchestrator, and inference."
-    )
     rollout_transport: TransportConfig | None = Field(
         None, description="Shared rollout transport, propagated to trainer and orchestrator."
     )
-    resume: ResumeConfig | None = None
     deployment: DeploymentConfig = Field(
         SingleNodeDeploymentConfig(), description="GPU/node split between this role's trainer and inference."
     )
@@ -85,24 +58,17 @@ class AdversarialRoleConfig(BaseConfig):
             self.orchestrator.model.name = self.model.name
             if self.inference is not None:
                 self.inference.vllm.model = self.model.name
-        if self.tokenizer is not None:
-            self.trainer.tokenizer = self.tokenizer.model_copy(deep=True)
-            self.orchestrator.tokenizer = self.tokenizer.model_copy(deep=True)
         if self.max_steps is not None:
             self.trainer.max_steps = self.max_steps
             self.orchestrator.max_steps = self.max_steps
         if self.seq_len is not None:
             self.trainer.model.seq_len = self.seq_len
             self.orchestrator.seq_len = self.seq_len
-        if self.weight_broadcast is not None:
-            self._propagate_weight_broadcast()
         if self.rollout_transport is not None:
             self.orchestrator.rollout_transport = self.rollout_transport.model_copy(deep=True)
         # The trainer must consume batches over the same transport the orchestrator
         # sends on (the upstream trainer default is ZMQ, ours is filesystem).
         self.trainer.rollout_transport = self.orchestrator.rollout_transport.model_copy(deep=True)
-        if self.resume is not None:
-            self.trainer.resume = self.resume.model_copy(deep=True)
         if self.wandb is not None:
             self.trainer.monitors.wandb = self.wandb.model_copy(deep=True)
             self.orchestrator.wandb = self.wandb.model_copy(deep=True)
@@ -119,23 +85,6 @@ class AdversarialRoleConfig(BaseConfig):
             self.inference.vllm.enable_lora = True
             self.inference.vllm.max_lora_rank = lora.rank
         return self
-
-    def _propagate_weight_broadcast(self) -> None:
-        assert self.weight_broadcast is not None
-        data = self.weight_broadcast.model_dump()
-        if isinstance(self.weight_broadcast, SharedFileSystemWeightBroadcastConfig):
-            self.trainer.weight_broadcast = TrainerFileSystemWeightBroadcastConfig()
-            self.orchestrator.weight_broadcast = AdversarialOrchestratorFileSystemWeightBroadcastConfig()
-        elif isinstance(self.weight_broadcast, SharedNCCLWeightBroadcastConfig):
-            self.trainer.weight_broadcast = TrainerNCCLWeightBroadcastConfig(**data)
-            self.orchestrator.weight_broadcast = AdversarialOrchestratorNCCLWeightBroadcastConfig(**data)
-        elif isinstance(self.weight_broadcast, SharedNIXLWeightBroadcastConfig):
-            self.trainer.weight_broadcast = TrainerNIXLWeightBroadcastConfig(**data)
-            raise ValueError("adversarial-rl does not support NIXL weight broadcast yet.")
-        else:
-            raise ValueError(f"Unsupported weight broadcast config: {self.weight_broadcast!r}")
-        if self.inference is not None:
-            self.inference.weight_broadcast.type = self.weight_broadcast.type
 
 
 class AdversarialRLConfig(BaseConfig):
@@ -156,7 +105,6 @@ class AdversarialRLConfig(BaseConfig):
             "requires pairwise = true in the judge env args)."
         ),
     )
-    resume_step: int | None = Field(None, ge=1)
     judge_update_gate: JudgeUpdateGateConfig = JudgeUpdateGateConfig()
     log: SharedLogConfig = SharedLogConfig()
 
@@ -173,11 +121,6 @@ class AdversarialRLConfig(BaseConfig):
             raise ValueError("adversarial-rl requires fixed generator and judge batch_size.")
         self.generator = self.with_output_dir(self.generator, self.output_dir / "generator")
         self.judge = self.with_output_dir(self.judge, self.output_dir / "judge")
-        if self.resume_step is not None:
-            for run in (self.generator, self.judge):
-                if run.trainer.ckpt is None:
-                    run.trainer.ckpt = TrainerCheckpointConfig()
-                run.trainer.resume = ResumeConfig(step=self.resume_step)
         return self
 
     def with_output_dir(self, run: AdversarialRoleConfig, output_dir: Path) -> AdversarialRoleConfig:

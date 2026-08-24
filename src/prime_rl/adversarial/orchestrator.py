@@ -97,20 +97,6 @@ def require_config(config: AdversarialRLConfig) -> None:
         raise ValueError("the judge env args must set pairwise = true exactly when judge_objective is pairwise.")
     if judge.group_size != 1:
         raise ValueError("judge group_size must be 1 for classifier training.")
-    resume_steps = [
-        run.trainer.ckpt.resume_step
-        for run in (config.generator, config.judge)
-        if run.trainer.ckpt is not None and run.trainer.ckpt.resume_step is not None
-    ]
-    if config.resume_step is None and resume_steps:
-        raise ValueError("adversarial resume requires top-level resume_step so generator and judge stay in sync.")
-    if config.resume_step is not None:
-        if any(step != config.resume_step for step in resume_steps):
-            raise ValueError("generator and judge trainer resume_step must match top-level adversarial resume_step.")
-        if config.resume_step >= get_max_steps(config.generator):
-            raise ValueError("adversarial resume_step must be lower than max_steps.")
-
-
 def legacy_train_client(orch) -> vf.ClientConfig:
     """Rollout client for the legacy verifiers envs. The upstream ``setup_client``
     builds verifiers.v1 client configs, which legacy ``run_rollout`` rejects."""
@@ -132,7 +118,7 @@ async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
     logger = setup_logger(config.log.level or "info", json_logging=config.log.json_logging)
     orch = config.orchestrator
     env_config = orch.train.env
-    env = vf.load_environment(env_config.stripped_id, **env_config.args)
+    env = vf.load_environment(env_config.id, **env_config.args)
     tokenizer = setup_tokenizer(orch.tokenizer)
     rollout_model_name = orch.model.name
     renderer = create_renderer(tokenizer, orch.renderer)
@@ -469,14 +455,11 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
     try:
         generator = await setup_role("generator", config.generator)
         judge = await setup_role("judge", config.judge)
-        start_step = config.resume_step or 0
-        if start_step:
-            logger.info(f"Resuming generator and judge inference from step {start_step}")
-        # The trainers offer their startup weights and block until each role's
-        # receiver acknowledges and joins the transfer.
+        # The trainers offer their startup weights (v0) and block until each
+        # role's receiver acknowledges and joins the transfer.
         await asyncio.gather(
-            wait_and_update(generator, start_step),
-            wait_and_update(judge, start_step),
+            wait_and_update(generator, 0),
+            wait_and_update(judge, 0),
         )
         examples = list(generator.env.get_dataset(seed=config.generator.orchestrator.seed))
         if not examples:
@@ -499,7 +482,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
         logger.info(
             f"Loop ready: max_steps={config.generator.max_steps}, batch_size={batch_size}, group_size={group_size}"
         )
-        if eval_config is not None and start_step == 0:
+        if eval_config is not None:
             logger.info("Running pre-training adversarial eval at step 0")
             eval_rollouts = await run_generator_eval(
                 generator,
@@ -525,7 +508,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 f"Step 0 eval | Eval reward: {eval_log_values['eval/generator/reward/mean']:.4f}"
             )
 
-        for step in range(start_step, get_max_steps(config.generator)):
+        for step in range(get_max_steps(config.generator)):
             step_start = time.perf_counter()
             offset = step * groups_per_step
             batch_examples = [dict(examples[(offset + idx) % len(examples)]) for idx in range(groups_per_step)]
@@ -560,7 +543,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             skip_judge_update = not scored.judge_rollouts or should_skip_judge_update(
                 config,
                 judge_gate_state,
-                step - start_step,
+                step,
                 judge_accuracy,
             )
 

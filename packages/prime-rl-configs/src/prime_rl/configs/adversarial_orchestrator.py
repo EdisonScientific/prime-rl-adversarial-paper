@@ -30,12 +30,8 @@ class EnvConfig(BaseConfig):
     args: dict = Field({}, description="Kwargs for vf.load_environment.")
 
     @property
-    def stripped_id(self) -> str:
-        return self.id.split("@")[0]
-
-    @property
     def resolved_name(self) -> str:
-        return self.name or self.stripped_id
+        return self.name or self.id
 
 
 class TrainConfig(BaseConfig):
@@ -48,7 +44,7 @@ class EvalConfig(BaseConfig):
     """Periodic generator eval on the env's eval dataset, using the train sampling args."""
 
     num_examples: int = Field(-1, description="-1 uses all available examples.")
-    group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
+    group_size: int = Field(1, ge=1)
     interval: int = Field(100, ge=1)
 
 

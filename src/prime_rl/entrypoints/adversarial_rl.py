@@ -200,14 +200,11 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
         validate_run_dir(
             role_config.output_dir,
             output_dir=config.output_dir,
-            resuming=role_config.resume is not None,
+            resuming=False,
             clean=config.clean_output_dir or role_config.clean,
         )
         role_config.output_dir.mkdir(parents=True, exist_ok=True)
-        if role_config.resume is None:
-            clean_future_steps(role_config.output_dir, -1)
-        elif role_config.resume.step is not None:
-            clean_future_steps(role_config.output_dir, role_config.resume.step)
+        clean_future_steps(role_config.output_dir, -1)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     config.generator.trainer.monitors.wandb = None
