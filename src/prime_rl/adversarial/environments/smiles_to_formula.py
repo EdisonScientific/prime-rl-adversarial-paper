@@ -52,7 +52,7 @@ def parse_formula_counts(formula: str | None) -> Counter[str] | None:
     return formula_atom_counts(text)
 
 
-def formula_l1_to_target(candidate_formula: str | None, solution: dict[str, Any]) -> float | None:
+def formula_l1_to_target(candidate_formula: str | None, solution: str) -> float | None:
     """L1 atom-count distance between candidate and target; None when the candidate is not a valid formula."""
     candidate_counts = parse_formula_counts(candidate_formula)
     if candidate_counts is None:
@@ -62,20 +62,22 @@ def formula_l1_to_target(candidate_formula: str | None, solution: dict[str, Any]
     return float(sum(abs(candidate_counts[element] - target_counts[element]) for element in elements))
 
 
-def ether0_target_formula(solution: dict[str, Any]) -> str:
-    if solution["fxn_name"] == "formula_eval":
-        reference_mol = Chem.MolFromSmiles(solution["answer_info"])
+def ether0_target_formula(solution: str) -> str:
+    """Target formula from an ether0 solution string (``fxn_name!:!answer_info!:!problem_type``)."""
+    fxn_name, answer_info, _ = solution.split("!:!")
+    if fxn_name == "formula_eval":
+        reference_mol = Chem.MolFromSmiles(answer_info)
         if reference_mol is None:
             raise ValueError("Ether0 formula_eval reference answer is not a valid SMILES string.")
         return CalcMolFormula(reference_mol)
 
-    if solution["fxn_name"] == "functional_group_eval":
-        formula, groups = ast.literal_eval(solution["answer_info"])
+    if fxn_name == "functional_group_eval":
+        formula, groups = ast.literal_eval(answer_info)
         if groups:
             raise ValueError("Ether0 adversarial env only supports simple-formula examples with no group constraints.")
         return str(formula)
 
-    raise ValueError(f"Ether0 adversarial env only supports formula rewards for now, got {solution['fxn_name']!r}.")
+    raise ValueError(f"Ether0 adversarial env only supports formula rewards for now, got {fxn_name!r}.")
 
 
 def build_ether0_smiles_to_formula_dataset(
