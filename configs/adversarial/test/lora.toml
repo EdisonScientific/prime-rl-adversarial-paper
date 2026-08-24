@@ -1,6 +1,3 @@
-# Overlay: rank-16 LoRA on both roles (stack on an env config, e.g.
-# `@ multiplication.toml @ lora.toml`). Adapter-only training needs a much
-# larger LR than full finetuning (100x the reference recipe).
 [generator.trainer.model.lora]
 rank = 16
 

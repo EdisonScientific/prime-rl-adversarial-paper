@@ -1,4 +1,3 @@
-# Overlay: quick smoke — stack last, e.g. `@ base.toml @ multiplication.toml @ short.toml`.
 [generator]
 max_steps = 100
 

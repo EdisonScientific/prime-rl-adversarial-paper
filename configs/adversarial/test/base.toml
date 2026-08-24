@@ -1,6 +1,3 @@
-# Shared recipe for all adversarial test runs (the hyperparameters validated on
-# 4-digit multiplication). Stack an env overlay on top, then optional feature
-# overlays: `adversarial-rl @ base.toml @ multiplication.toml [@ pairwise.toml @ lora.toml]`.
 output_dir = "outputs/adversarial-test"
 generator_reward_mode = "judge"
 judge_objective = "single_candidate"
