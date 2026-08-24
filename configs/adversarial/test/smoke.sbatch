@@ -36,4 +36,4 @@ if [[ "${SPEC}" == *+* ]]; then
   NAME_ARGS=(--output-dir "outputs/${RUN_NAME}" --generator.wandb.name "${RUN_NAME}")
 fi
 
-uv run --no-sync --extra flash-attn adversarial-rl "${CONFIG_ARGS[@]}" "${NAME_ARGS[@]}"
+uv run --no-sync --extra flash-attn adversarial-rl "${CONFIG_ARGS[@]}" "${NAME_ARGS[@]}" "${@:2}"

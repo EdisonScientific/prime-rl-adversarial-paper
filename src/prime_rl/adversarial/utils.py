@@ -10,8 +10,24 @@ from verifiers.utils.save_utils import make_serializable
 from prime_rl.transports.batch.types import TrainingSample
 from prime_rl.utils.chat_template import deserialize_tool_calls, normalize_messages
 from prime_rl.utils.logger import get_logger
+from prime_rl.utils.utils import get_all_ckpt_steps, get_ckpt_dir
 
 ANSWER_RE = re.compile(r"\s*<answer>(.*?)</answer>\s*\Z", re.DOTALL | re.IGNORECASE)
+
+
+def latest_common_ckpt_step(generator_output_dir: Path, judge_output_dir: Path) -> int:
+    """Latest step at which both roles have a trainer checkpoint. Both trainers
+    train every step (checkpoint steps equal loop steps) unless the judge
+    update gate skipped an update before the crash — then their counters have
+    diverged and the run cannot be resumed consistently."""
+    common_steps = set(get_all_ckpt_steps(get_ckpt_dir(generator_output_dir))) & set(
+        get_all_ckpt_steps(get_ckpt_dir(judge_output_dir))
+    )
+    if not common_steps:
+        raise ValueError(
+            f"No common checkpoint step under {generator_output_dir} and {judge_output_dir}; cannot resume."
+        )
+    return max(common_steps)
 
 
 def completion_text(completion: Any) -> str:

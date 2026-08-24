@@ -43,10 +43,10 @@ launch_args() {
 mapfile -t ARGS1 < <(launch_args "${SPEC1}")
 mapfile -t ARGS2 < <(launch_args "${SPEC2}")
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --no-sync --extra flash-attn adversarial-rl "${ARGS1[@]}" \
+CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --no-sync --extra flash-attn adversarial-rl "${ARGS1[@]}" "${@:3}" \
   > "slurm-adv-${SPEC1//+/-}-${SLURM_JOB_ID}.log" 2>&1 &
 PID1=$!
-CUDA_VISIBLE_DEVICES=4,5,6,7 uv run --no-sync --extra flash-attn adversarial-rl "${ARGS2[@]}" \
+CUDA_VISIBLE_DEVICES=4,5,6,7 uv run --no-sync --extra flash-attn adversarial-rl "${ARGS2[@]}" "${@:3}" \
   > "slurm-adv-${SPEC2//+/-}-${SLURM_JOB_ID}.log" 2>&1 &
 PID2=$!
 

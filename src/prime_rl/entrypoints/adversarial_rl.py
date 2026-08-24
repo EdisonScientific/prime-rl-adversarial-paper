@@ -15,7 +15,9 @@ from typing import Any
 import tomli_w
 
 import prime_rl._compat  # noqa: F401
+from prime_rl.adversarial.utils import latest_common_ckpt_step
 from prime_rl.configs.adversarial import AdversarialRLConfig
+from prime_rl.configs.shared import ResumeConfig
 from prime_rl.entrypoints.rl import (
     INFERENCE_CONFIG,
     INFERENCE_CONFIG_EXCLUDE,
@@ -196,15 +198,22 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
         logger.warning(f"Cleaning existing directory: {config.output_dir}")
         shutil.rmtree(config.output_dir)
 
+    resume_step = -1
+    if config.resume:
+        resume_step = latest_common_ckpt_step(config.generator.output_dir, config.judge.output_dir)
+        logger.info(f"Resuming both roles from checkpoint step {resume_step}")
+        for role_config in (config.generator, config.judge):
+            role_config.trainer.resume = ResumeConfig(step=resume_step)
+
     for role_config in (config.generator, config.judge):
         validate_run_dir(
             role_config.output_dir,
             output_dir=config.output_dir,
-            resuming=False,
+            resuming=config.resume,
             clean=config.clean_output_dir or role_config.clean,
         )
         role_config.output_dir.mkdir(parents=True, exist_ok=True)
-        clean_future_steps(role_config.output_dir, -1)
+        clean_future_steps(role_config.output_dir, resume_step)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     config.generator.trainer.monitors.wandb = None

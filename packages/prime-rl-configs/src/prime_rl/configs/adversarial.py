@@ -105,6 +105,9 @@ class AdversarialRLConfig(BaseConfig):
             "requires pairwise = true in the judge env args)."
         ),
     )
+    resume: bool = Field(
+        False, description="Resume both roles from the latest step where each has a trainer checkpoint."
+    )
     judge_update_gate: JudgeUpdateGateConfig = JudgeUpdateGateConfig()
     log: SharedLogConfig = SharedLogConfig()
 

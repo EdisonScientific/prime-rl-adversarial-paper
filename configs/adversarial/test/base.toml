@@ -18,6 +18,10 @@ name = "Qwen/Qwen3-0.6B"
 [generator.wandb]
 project = "testing-adversarial"
 
+[generator.trainer.ckpt]
+interval = 100
+keep_last = 2
+
 [generator.trainer.model]
 attn = "flash_attention_2"
 
@@ -67,6 +71,10 @@ seq_len = 2048
 
 [judge.model]
 name = "Qwen/Qwen3-1.7B"
+
+[judge.trainer.ckpt]
+interval = 100
+keep_last = 2
 
 [judge.trainer.model]
 attn = "flash_attention_2"

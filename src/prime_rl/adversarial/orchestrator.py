@@ -12,6 +12,7 @@ import prime_rl.monitors as monitors
 from prime_rl.adversarial.utils import (
     backfill_rollout_tokens,
     get_model_completion_len,
+    latest_common_ckpt_step,
     rollout_to_sample,
     save_rollouts,
 )
@@ -455,11 +456,15 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
     try:
         generator = await setup_role("generator", config.generator)
         judge = await setup_role("judge", config.judge)
-        # The trainers offer their startup weights (v0) and block until each
-        # role's receiver acknowledges and joins the transfer.
+        start_step = 0
+        if config.resume:
+            start_step = latest_common_ckpt_step(config.generator.output_dir, config.judge.output_dir)
+            logger.info(f"Resuming generator and judge from checkpoint step {start_step}")
+        # The trainers offer their startup weights (v{start_step}) and block
+        # until each role's receiver acknowledges and joins the transfer.
         await asyncio.gather(
-            wait_and_update(generator, 0),
-            wait_and_update(judge, 0),
+            wait_and_update(generator, start_step),
+            wait_and_update(judge, start_step),
         )
         examples = list(generator.env.get_dataset(seed=config.generator.orchestrator.seed))
         if not examples:
@@ -482,7 +487,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
         logger.info(
             f"Loop ready: max_steps={config.generator.max_steps}, batch_size={batch_size}, group_size={group_size}"
         )
-        if eval_config is not None:
+        if eval_config is not None and start_step == 0:
             logger.info("Running pre-training adversarial eval at step 0")
             eval_rollouts = await run_generator_eval(
                 generator,
@@ -508,7 +513,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 f"Step 0 eval | Eval reward: {eval_log_values['eval/generator/reward/mean']:.4f}"
             )
 
-        for step in range(get_max_steps(config.generator)):
+        for step in range(start_step, get_max_steps(config.generator)):
             step_start = time.perf_counter()
             offset = step * groups_per_step
             batch_examples = [dict(examples[(offset + idx) % len(examples)]) for idx in range(groups_per_step)]
