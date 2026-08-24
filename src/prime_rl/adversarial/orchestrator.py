@@ -43,6 +43,7 @@ class RoleRuntime:
     inference_pool: InferencePool
     model_name: str
     train_client: vf.ClientConfig
+    lora_name: str | None = None
     ckpt_step: int = 0
     train_step: int = 0
 
@@ -164,6 +165,7 @@ async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
         inference_pool=inference_pool,
         model_name=rollout_model_name,
         train_client=legacy_train_client(orch),
+        lora_name=orch.lora_name,
     )
 
 
@@ -432,7 +434,10 @@ async def send_role_batch(runtime: RoleRuntime, rollouts: list[vf.RolloutOutput]
 async def wait_and_update(runtime: RoleRuntime, next_step: int) -> None:
     weights_path = get_step_path(get_broadcast_dir(runtime.config.orchestrator.output_dir), next_step)
     await wait_for_path(weights_path / "STABLE", interval=1, log_interval=30)
-    await runtime.inference_pool.update_weights(weights_path, step=next_step)
+    await runtime.inference_pool.update_weights(weights_path, lora_name=runtime.lora_name, step=next_step)
+    if runtime.lora_name is not None:
+        runtime.model_name = runtime.lora_name
+        runtime.inference_pool.update_model_name(runtime.lora_name)
     runtime.ckpt_step = next_step
     runtime.train_step = next_step
 

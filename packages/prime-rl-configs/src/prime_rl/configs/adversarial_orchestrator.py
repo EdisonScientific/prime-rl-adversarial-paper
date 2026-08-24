@@ -82,6 +82,9 @@ class OrchestratorConfig(BaseConfig):
 
     weight_broadcast: WeightBroadcastConfig = FileSystemWeightBroadcastConfig()
 
+    lora_name: str | None = None
+    """Served LoRA adapter name; auto-derived from the trainer's LoRA config."""
+
     rollout_transport: TransportConfig = FileSystemTransportConfig()
 
     output_dir: Path = Path("outputs")
