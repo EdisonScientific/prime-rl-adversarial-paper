@@ -38,6 +38,7 @@ ports (the pairwise overlay moves to 8002/8003):
 sbatch configs/adversarial/test/smoke_pair.sbatch multiplication+lora multiplication+pairwise+lora
 ```
 
-Runs log to the `testing-adversarial` wandb project. The grant_abstract
-overlay points at the prepared JSONL on the cluster; adjust `dataset_path` if
-it lives elsewhere.
+Runs log to the `testing-adversarial` wandb project. Dataset paths point at
+prepared files on the cluster; canonical copies live as wandb artifacts under
+`edison-scientific/adversarial-datasets` (multiplication regenerates
+identically on the fly from its seed).
