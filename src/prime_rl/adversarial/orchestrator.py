@@ -534,7 +534,11 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 judge_objective=config.judge_objective,
             )
 
-            generator_verifiable_reward = fmean(float(r["metrics"]["verifiable_reward"]) for r in generator_rollouts)
+            generator_verifiable_rewards = [
+                float(r["metrics"]["verifiable_reward"])
+                for r in generator_rollouts
+                if "verifiable_reward" in r["metrics"]
+            ]
             judge_rewards = [float(r["reward"]) for r in scored.judge_rollouts]
             generated_judge_rollouts = [
                 r for r in scored.judge_rollouts if r.get("info", {}).get("kind") == "generated"
@@ -573,7 +577,6 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             judge_completion_lens = [float(get_model_completion_len(r)) for r in scored.judge_rollouts]
             log_values = {
                 "train/generator/reward/mean": fmean(scored.generator_rewards),
-                "train/generator/metrics/verifiable_reward/mean": generator_verifiable_reward,
                 "train/judge/reward/mean": judge_accuracy,
                 "train/generator/num_output_tokens/mean": fmean(generator_completion_lens),
                 "train/generator/num_output_tokens/min": min(generator_completion_lens, default=0.0),
@@ -584,6 +587,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 "train/judge/update_skipped": float(skip_judge_update),
                 "time/step": time.perf_counter() - step_start,
             }
+            if generator_verifiable_rewards:
+                log_values["train/generator/metrics/verifiable_reward/mean"] = fmean(generator_verifiable_rewards)
             max_completion_tokens = generator.sampling_args.get("max_completion_tokens")
             if max_completion_tokens:
                 log_values["train/generator/metrics/is_truncated/mean"] = fmean(
@@ -619,8 +624,12 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             logger.success(
                 f"Step {step} | Time: {time.perf_counter() - step_start:.2f}s | "
                 f"Gen reward: {log_values['train/generator/reward/mean']:.4f} | "
-                f"Gen verifiable: {log_values['train/generator/metrics/verifiable_reward/mean']:.4f} | "
-                f"Judge acc: {log_values['train/judge/reward/mean']:.4f} | "
+                + (
+                    f"Gen verifiable: {fmean(generator_verifiable_rewards):.4f} | "
+                    if generator_verifiable_rewards
+                    else ""
+                )
+                + f"Judge acc: {log_values['train/judge/reward/mean']:.4f} | "
                 f"Judge skip: {int(skip_judge_update)}"
             )
     finally:

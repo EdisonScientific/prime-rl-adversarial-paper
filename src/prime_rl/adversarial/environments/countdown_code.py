@@ -70,9 +70,6 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
         num_eval_examples: int | None = None,
         **_: Any,
     ):
-        # Prepared parquet splits with model-written reference solutions; None takes
-        # a full split. The rows are rebuilt so the env's own system prompt applies
-        # instead of the one baked into the data.
         source = load_dataset("parquet", data_dir=f"{dataset_path}/data")
 
         def rows(split, limit: int | None) -> list[dict[str, Any]]:

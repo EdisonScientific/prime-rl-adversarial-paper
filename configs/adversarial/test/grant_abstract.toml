@@ -3,10 +3,5 @@ output_dir = "outputs/adversarial-test-grant-abstract"
 [generator.wandb]
 name = "adversarial-test-grant-abstract"
 
-[generator.orchestrator.eval]
-interval = 250
-num_examples = 128
-group_size = 1
-
 [generator.orchestrator.train.env]
-args = { task = "grant_abstract", dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_cleanv4_moderate_train20000_seed1.jsonl", eval_dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_cleanv4_moderate_eval128_seed1.jsonl", num_examples = 20000, num_eval_examples = 128, seed = 1 }
+args = { task = "grant_abstract", dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_cleanv4_moderate_train20000_seed1.jsonl", num_examples = 20000, seed = 1 }

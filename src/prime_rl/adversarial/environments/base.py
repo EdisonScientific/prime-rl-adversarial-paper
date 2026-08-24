@@ -2,6 +2,8 @@ from typing import Any
 
 import verifiers as vf
 
+from prime_rl.adversarial.utils import extract_answer
+
 
 def make_example(example_id: int, question: str, answer: str, info: dict[str, Any] | None = None) -> dict[str, Any]:
     """A dataset row in the shape all adversarial envs share."""
@@ -25,10 +27,13 @@ class GeneratorEnv(vf.SingleTurnEnv):
     - ``adversarial_candidate_answer(completion)``: parsed model answer, or
       ``None`` when the completion doesn't follow the answer format.
     - ``adversarial_generator_result(completion, example)``: dict with
-      ``candidate``, ``format_ok``, ``verifiable_reward``, and per-rollout
-      ``metrics``.
+      ``candidate``, ``format_ok``, per-rollout ``metrics``, and — only for
+      envs with a programmatic check — ``verifiable_reward``.
     - ``adversarial_judge_prompt(question, candidate)``: the A/B classification
       prompt for the judge.
+
+    The defaults cover free-generation envs (raw answer text, format-only
+    result); envs with a verifiable reward override the last two hooks.
     """
 
     judge_task_label = "Task"
@@ -43,13 +48,16 @@ class GeneratorEnv(vf.SingleTurnEnv):
     async def placeholder_reward(self, completions, **kwargs) -> list[float]:
         return [0.0 for _ in completions]
 
-    def generator_result(self, candidate: Any, format_ok: bool, verifiable_reward: float) -> dict[str, Any]:
-        return {
+    def generator_result(self, candidate: Any, format_ok: bool, verifiable_reward: float | None = None) -> dict[str, Any]:
+        result = {
             "candidate": "" if candidate is None else str(candidate),
             "format_ok": format_ok,
-            "verifiable_reward": verifiable_reward,
-            "metrics": {"format_reward": float(format_ok), "verifiable_reward": verifiable_reward},
+            "metrics": {"format_reward": float(format_ok)},
         }
+        if verifiable_reward is not None:
+            result["verifiable_reward"] = verifiable_reward
+            result["metrics"]["verifiable_reward"] = verifiable_reward
+        return result
 
     def adversarial_question(self, example: dict[str, Any]) -> str:
         info = example.get("info") or {}
@@ -60,10 +68,12 @@ class GeneratorEnv(vf.SingleTurnEnv):
         return str(info.get("reference") or example["answer"])
 
     def adversarial_candidate_answer(self, completion: Any) -> Any:
-        raise NotImplementedError
+        # Raw answer text: the judge sees exactly what the generator wrote.
+        return extract_answer(completion)
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
-        raise NotImplementedError
+        candidate = self.adversarial_candidate_answer(completion)
+        return self.generator_result(candidate, candidate is not None)
 
     # Candidates are injected verbatim (newlines and all) between explicit tags so the
     # judge sees the real formatting and multi-line answers cannot bleed into the prompt.
