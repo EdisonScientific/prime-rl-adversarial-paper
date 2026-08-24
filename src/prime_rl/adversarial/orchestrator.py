@@ -86,11 +86,12 @@ def require_config(config: AdversarialRLConfig) -> None:
         raise ValueError("generator and judge batch_size are required.")
     if gen.batch_size % gen.group_size != 0:
         raise ValueError("generator batch_size must be divisible by group_size.")
-    max_judge_batch_size = 2 * gen.batch_size
+    pairwise = config.judge_objective == "pairwise"
+    max_judge_batch_size = gen.batch_size if pairwise else 2 * gen.batch_size
     if judge.batch_size > max_judge_batch_size:
-        raise ValueError(
-            f"judge batch_size must be at most {max_judge_batch_size} for single-candidate A/B training."
-        )
+        raise ValueError(f"judge batch_size must be at most {max_judge_batch_size} for judge_objective={config.judge_objective}.")
+    if bool(judge.train.env.args.get("pairwise")) != pairwise:
+        raise ValueError("the judge env args must set pairwise = true exactly when judge_objective is pairwise.")
     if judge.group_size != 1:
         raise ValueError("judge group_size must be 1 for classifier training.")
     resume_steps = [
@@ -246,6 +247,30 @@ async def run_judge_rollout(
     return output
 
 
+def single_candidate_judge_tasks(env: Any, question: str, reference: str, candidate: str) -> list[tuple[str, float, str]]:
+    """One judge call per answer as ``(prompt, label, kind)``; label 1.0 means the correct choice is A."""
+    return [
+        (env.adversarial_judge_prompt(question, candidate), 0.0, "generated"),
+        (env.adversarial_judge_prompt(question, reference), 1.0, "reference"),
+    ]
+
+
+def pairwise_judge_tasks(
+    env: Any, question: str, reference: str, candidate: str, *, reference_first: bool
+) -> list[tuple[str, float, str]]:
+    """One judge call showing both answers; the correct choice is the reference's slot."""
+    first, second = (reference, candidate) if reference_first else (candidate, reference)
+    return [(env.adversarial_pairwise_judge_prompt(question, first, second), float(reference_first), "pairwise")]
+
+
+def generated_win_probability(slot_a_probability: float | None, first_label: float) -> float | None:
+    """P(the judge deems the generated answer real). In both objectives the generated answer
+    occupies slot A exactly when the rollout's first judge task carries label 0."""
+    if slot_a_probability is None:
+        return None
+    return slot_a_probability if first_label == 0.0 else 1.0 - slot_a_probability
+
+
 async def score_and_build_judge_batch(
     generator_env: Any,
     judge: RoleRuntime,
@@ -254,9 +279,10 @@ async def score_and_build_judge_batch(
     generator_groups: list[list[vf.RolloutOutput]],
     examples: list[dict[str, Any]],
     reward_mode: str,
+    judge_objective: str,
 ) -> ScoredBatch:
     judge_tasks: list[asyncio.Task[vf.RolloutOutput]] = []
-    generated_task_positions: list[tuple[vf.RolloutOutput, dict[str, Any]]] = []
+    scored_positions: list[tuple[vf.RolloutOutput, dict[str, Any], float, int]] = []
     generator_rewards: list[float] = []
 
     def assign_generator_reward(
@@ -286,54 +312,53 @@ async def score_and_build_judge_batch(
                 )
                 continue
 
-            # Unique judge example ids across steps/groups/rollouts (pair: generated, reference).
+            if judge_objective == "pairwise":
+                # Alternate the reference's slot deterministically to avoid position bias.
+                tasks = pairwise_judge_tasks(
+                    generator_env,
+                    question,
+                    reference,
+                    result["candidate"],
+                    reference_first=(step + group_idx + rollout_idx) % 2 == 0,
+                )
+            else:
+                tasks = single_candidate_judge_tasks(generator_env, question, reference, result["candidate"])
+            scored_positions.append((rollout, result, tasks[0][1], len(judge_tasks)))
+            # Unique judge example ids across steps/groups/rollouts.
             base_id = step * 1_000_000 + group_idx * 10_000 + rollout_idx * 2
-            generated_task_positions.append((rollout, result))
-            judge_tasks.append(
-                asyncio.create_task(
-                    run_judge_rollout(
-                        judge,
-                        example_id=base_id,
-                        prompt=generator_env.adversarial_judge_prompt(question, result["candidate"]),
-                        label=0.0,
-                        kind="generated",
-                        cache_salt=str(judge.ckpt_step),
+            for offset, (prompt, label, kind) in enumerate(tasks):
+                judge_tasks.append(
+                    asyncio.create_task(
+                        run_judge_rollout(
+                            judge,
+                            example_id=base_id + offset,
+                            prompt=prompt,
+                            label=label,
+                            kind=kind,
+                            cache_salt=str(judge.ckpt_step),
+                        )
                     )
                 )
-            )
-            judge_tasks.append(
-                asyncio.create_task(
-                    run_judge_rollout(
-                        judge,
-                        example_id=base_id + 1,
-                        prompt=generator_env.adversarial_judge_prompt(question, reference),
-                        label=1.0,
-                        kind="reference",
-                        cache_salt=str(judge.ckpt_step),
-                    )
-                )
-            )
 
     judge_rollouts = await asyncio.gather(*judge_tasks) if judge_tasks else []
-    # Tasks were appended in (generated, reference) pairs, so even slots are generated.
-    generated_judge_rollouts = judge_rollouts[0::2]
     judge_env = judge.env
 
-    for (rollout, result), judge_rollout in zip(generated_task_positions, generated_judge_rollouts):
-        judge_reference_probability_proxy = judge_env.adversarial_reference_probability_proxy(judge_rollout)
+    for rollout, result, first_label, task_idx in scored_positions:
+        slot_a_probability = judge_env.adversarial_reference_probability_proxy(judge_rollouts[task_idx])
+        p_generated = generated_win_probability(slot_a_probability, first_label)
         if not result["format_ok"]:
             reward = 0.0
         elif reward_mode == "exact_only":
             reward = result["verifiable_reward"]
         elif reward_mode == "judge_times_exact":
-            reward = (judge_reference_probability_proxy or 0.0) * result["verifiable_reward"]
+            reward = (p_generated or 0.0) * result["verifiable_reward"]
         else:
-            reward = judge_reference_probability_proxy or 0.0
+            reward = p_generated or 0.0
         assign_generator_reward(
             rollout,
             result,
             reward=reward,
-            judge_reference_probability_proxy=judge_reference_probability_proxy,
+            judge_reference_probability_proxy=p_generated,
         )
 
     return ScoredBatch(
@@ -522,6 +547,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 generator_groups=generator_groups,
                 examples=batch_examples,
                 reward_mode=config.generator_reward_mode,
+                judge_objective=config.judge_objective,
             )
 
             generator_verifiable_reward = fmean(float(r["metrics"]["verifiable_reward"]) for r in generator_rollouts)
@@ -565,8 +591,6 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 "train/generator/reward/mean": fmean(scored.generator_rewards),
                 "train/generator/metrics/verifiable_reward/mean": generator_verifiable_reward,
                 "train/judge/reward/mean": judge_accuracy,
-                "train/judge/metrics/generated_accuracy/mean": fmean(generated_judge_rewards) if generated_judge_rewards else 0.0,
-                "train/judge/metrics/reference_accuracy/mean": fmean(reference_judge_rewards) if reference_judge_rewards else 0.0,
                 "train/generator/num_output_tokens/mean": fmean(generator_completion_lens),
                 "train/generator/num_output_tokens/min": min(generator_completion_lens, default=0.0),
                 "train/generator/num_output_tokens/max": max(generator_completion_lens, default=0.0),
@@ -576,6 +600,11 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 "train/judge/update_skipped": float(skip_judge_update),
                 "time/step": time.perf_counter() - step_start,
             }
+            # Per-kind accuracy only exists for single-candidate judging.
+            if generated_judge_rewards:
+                log_values["train/judge/metrics/generated_accuracy/mean"] = fmean(generated_judge_rewards)
+            if reference_judge_rewards:
+                log_values["train/judge/metrics/reference_accuracy/mean"] = fmean(reference_judge_rewards)
             if judge_gate_state.accuracy_ema is not None:
                 log_values["train/judge/accuracy_ema"] = judge_gate_state.accuracy_ema
             if eval_config is not None and (step + 1) % eval_config.interval == 0:

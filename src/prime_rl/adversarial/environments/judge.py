@@ -15,13 +15,23 @@ A for reference answer.
 B for model-generated answer.
 """
 
+PAIRWISE_JUDGE_SYSTEM_PROMPT = """\
+You are an answer discriminator. Given a task and two candidate answers,
+decide which candidate is more likely to be the reference answer.
+
+Answer with exactly one character:
+A if Candidate A is more likely to be the reference answer.
+B if Candidate B is more likely to be the reference answer.
+"""
+
+
 class BinaryJudgeEnv(vf.SingleTurnEnv):
     """One-token A/B judge; training labels are attached by the orchestrator."""
 
-    def __init__(self, **_: Any):
+    def __init__(self, pairwise: bool = False, **_: Any):
         super().__init__(
             dataset=Dataset.from_list([{"example_id": 0, "prompt": [{"role": "user", "content": "bootstrap"}]}]),
-            system_prompt=JUDGE_SYSTEM_PROMPT,
+            system_prompt=PAIRWISE_JUDGE_SYSTEM_PROMPT if pairwise else JUDGE_SYSTEM_PROMPT,
             rubric=vf.Rubric(funcs=[self.judge_reward]),
         )
 

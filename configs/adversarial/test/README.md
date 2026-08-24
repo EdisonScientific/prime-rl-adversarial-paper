@@ -19,3 +19,13 @@ Runs log to the `testing-adversarial` wandb project.
 
 The grant_abstract config points at the prepared JSONL on the cluster; adjust
 `dataset_path` if it lives elsewhere.
+
+Pairwise judging (the judge sees generated and reference in one prompt and picks
+the reference; judge batch equals the generator batch) is enabled per config with:
+
+```toml
+judge_objective = "pairwise"
+```
+
+plus `pairwise = true` in the judge env args and `batch_size = 32` under
+`[judge.orchestrator]`.

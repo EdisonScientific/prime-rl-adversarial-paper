@@ -153,6 +153,11 @@ class AdversarialRLConfig(BaseConfig):
             )
         ),
     ] = "judge"
+    judge_objective: Literal["single_candidate", "pairwise"] = "single_candidate"
+    """``single_candidate``: the judge scores generated and reference answers separately
+    (two judge calls per rollout). ``pairwise``: the judge sees both in one prompt and
+    picks the reference (one call per rollout; requires ``pairwise = true`` in the judge env args)."""
+
     resume_step: int | None = Field(None, ge=1)
     judge_update_gate: JudgeUpdateGateConfig = JudgeUpdateGateConfig()
     log: SharedLogConfig = SharedLogConfig()
