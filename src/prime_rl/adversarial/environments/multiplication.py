@@ -43,9 +43,19 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
 
     judge_task_label = "Problem"
 
-    def __init__(self, n_digits: int = 3, num_examples: int = 10_000, seed: int = 0, **_: Any):
+    def __init__(
+        self,
+        n_digits: int = 3,
+        num_examples: int = 10_000,
+        num_eval_examples: int | None = None,
+        seed: int = 0,
+        **_: Any,
+    ):
+        total = num_examples + (num_eval_examples or 0)
+        dataset = build_multiplication_dataset(n_digits=n_digits, num_examples=total, seed=seed)
         super().__init__(
-            dataset=build_multiplication_dataset(n_digits=n_digits, num_examples=num_examples, seed=seed),
+            dataset=dataset.select(range(num_examples)),
+            eval_dataset=dataset.select(range(num_examples, total)) if num_eval_examples else None,
             system_prompt=MULTIPLICATION_GENERATOR_SYSTEM_PROMPT,
         )
 
