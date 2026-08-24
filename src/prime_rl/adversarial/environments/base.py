@@ -27,13 +27,13 @@ class GeneratorEnv(vf.SingleTurnEnv):
     - ``adversarial_candidate_answer(completion)``: parsed model answer, or
       ``None`` when the completion doesn't follow the answer format.
     - ``adversarial_generator_result(completion, example)``: dict with
-      ``candidate``, ``format_ok``, per-rollout ``metrics``, and — only for
-      envs with a programmatic check — ``verifiable_reward``.
+      ``candidate``, ``format_ok``, per-rollout ``metrics``, and, only for
+      envs with a programmatic check, ``verifiable_reward``.
     - ``adversarial_judge_prompt(question, candidate)``: the A/B classification
       prompt for the judge.
 
     The defaults cover free-generation envs (raw answer text, format-only
-    result); envs with a verifiable reward override the last two hooks.
+    result). Envs with a verifiable reward override the last two hooks.
     """
 
     judge_task_label = "Task"

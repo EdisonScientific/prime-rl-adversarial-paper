@@ -23,7 +23,7 @@ from prime_rl.utils.config import BaseConfig
 
 
 class EnvConfig(BaseConfig):
-    """Legacy-verifiers env; the v1 migration replaces this family with upstream imports."""
+    """Legacy-verifiers env. The v1 migration replaces this family with upstream imports."""
 
     id: str = "prime_rl.adversarial.envs"
     name: str | None = None
@@ -59,7 +59,7 @@ class OrchestratorConfig(BaseConfig):
     train: TrainConfig = TrainConfig()
     tokenizer: TokenizerConfig = TokenizerConfig()
     renderer: RendererConfig = Field(
-        AutoRendererConfig(), description="Renderer that tokenizes rollouts; auto resolves from the tokenizer name."
+        AutoRendererConfig(), description="Renderer that tokenizes rollouts. auto resolves from the tokenizer name."
     )
     eval: EvalConfig | None = None
     log: LogConfig = LogConfig()
@@ -67,7 +67,7 @@ class OrchestratorConfig(BaseConfig):
     weight_broadcast: WeightBroadcastConfig = FileSystemWeightBroadcastConfig()
     rollout_transport: TransportConfig = FileSystemTransportConfig()
     output_dir: Path = Field(
-        Path("outputs"), description="Root for this role's weights, rollouts, and logs; must match the trainer's."
+        Path("outputs"), description="Root for this role's weights, rollouts, and logs. Must match the trainer's."
     )
     batch_size: int | None = Field(None, ge=1)
     seed: int | None = None
@@ -98,7 +98,7 @@ class OrchestratorConfig(BaseConfig):
         model_id = self.tokenizer.name or self.model.name
         if model_id not in MODEL_RENDERER_MAP:
             raise ValueError(
-                f"renderer 'auto' cannot resolve {model_id!r} (not in renderers.base.MODEL_RENDERER_MAP); "
+                f"renderer 'auto' cannot resolve {model_id!r} (not in renderers.base.MODEL_RENDERER_MAP). "
                 f"set [orchestrator.renderer] name='default' or a model-specific renderer explicitly."
             )
         return self

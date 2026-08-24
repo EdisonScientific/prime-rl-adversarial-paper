@@ -25,7 +25,7 @@ Stop immediately after the closing answer tag.
 
 
 class MultiplicationGeneratorEnv(GeneratorEnv):
-    """Seeded n-digit multiplication; the verifiable reward is exact-product match."""
+    """Seeded n-digit multiplication. The verifiable reward is exact-product match."""
 
     judge_task_label = "Problem"
 

@@ -173,7 +173,7 @@ def start_process(cmd: list[str], log_path: Path, env: dict[str, str], node: str
         nodes = [node] if isinstance(node, str) else node
         remote_env = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
         # A literal {SLURM_PROCID} arg becomes $SLURM_PROCID, expanded per task on the
-        # remote side (multi-node torchrun --node-rank); everything else is quoted.
+        # remote side (multi-node torchrun --node-rank). Everything else is quoted.
         remote_cmd = " ".join("$SLURM_PROCID" if arg == "{SLURM_PROCID}" else shlex.quote(arg) for arg in cmd)
         cmd = [
             "srun",
@@ -216,8 +216,8 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
         clean_future_steps(role_config.output_dir, resume_step)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    # The orchestrator and the generator trainer share one W&B run; the judge
-    # trainer is muted (the orchestrator logs the judge metrics). The persisted
+    # The orchestrator and the generator trainer share one W&B run. The judge
+    # trainer is muted because the orchestrator logs the judge metrics. The persisted
     # run id makes resumed runs continue the same W&B run.
     run_id_file = config.output_dir / "wandb_run_id"
     if not run_id_file.exists():

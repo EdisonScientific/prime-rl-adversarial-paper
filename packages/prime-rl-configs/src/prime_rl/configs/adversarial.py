@@ -66,7 +66,7 @@ class AdversarialRoleConfig(BaseConfig):
             self.orchestrator.seq_len = self.seq_len
         if self.rollout_transport is not None:
             self.orchestrator.rollout_transport = self.rollout_transport.model_copy(deep=True)
-        # The trainer's rollout transport must match the orchestrator's; their defaults differ.
+        # The trainer's rollout transport must match the orchestrator's because their defaults differ.
         self.trainer.rollout_transport = self.orchestrator.rollout_transport.model_copy(deep=True)
         if self.wandb is not None:
             self.trainer.monitors.wandb = self.wandb.model_copy(deep=True)
@@ -99,8 +99,8 @@ class AdversarialRLConfig(BaseConfig):
     judge_objective: Literal["single_candidate", "pairwise"] = Field(
         "single_candidate",
         description=(
-            "single_candidate scores generated and reference answers separately (two judge calls per rollout); "
-            "pairwise shows the judge both in one prompt and picks the reference (one call per rollout; "
+            "single_candidate scores generated and reference answers separately (two judge calls per rollout). "
+            "pairwise shows the judge both in one prompt and picks the reference (one call per rollout, "
             "requires pairwise = true in the judge env args)."
         ),
     )

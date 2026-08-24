@@ -98,6 +98,8 @@ def require_config(config: AdversarialRLConfig) -> None:
         raise ValueError("the judge env args must set pairwise = true exactly when judge_objective is pairwise.")
     if judge.group_size != 1:
         raise ValueError("judge group_size must be 1 for classifier training.")
+
+        
 def legacy_train_client(orch) -> vf.ClientConfig:
     """Rollout client for the legacy verifiers envs. The upstream ``setup_client``
     builds verifiers.v1 client configs, which legacy ``run_rollout`` rejects."""
@@ -232,7 +234,7 @@ async def run_judge_rollout(
 
 
 def single_candidate_judge_tasks(env: Any, question: str, reference: str, candidate: str) -> list[tuple[str, float, str]]:
-    """One judge call per answer as ``(prompt, label, kind)``; label 1.0 means the correct choice is A."""
+    """One judge call per answer as ``(prompt, label, kind)``. Label 1.0 means the correct choice is A."""
     return [
         (env.adversarial_judge_prompt(question, candidate), 0.0, "generated"),
         (env.adversarial_judge_prompt(question, reference), 1.0, "reference"),
@@ -242,7 +244,7 @@ def single_candidate_judge_tasks(env: Any, question: str, reference: str, candid
 def pairwise_judge_tasks(
     env: Any, question: str, reference: str, candidate: str, *, reference_first: bool
 ) -> list[tuple[str, float, str]]:
-    """One judge call showing both answers; the correct choice is the reference's slot."""
+    """One judge call showing both answers. The correct choice is the reference's slot."""
     first, second = (reference, candidate) if reference_first else (candidate, reference)
     return [(env.adversarial_pairwise_judge_prompt(question, first, second), float(reference_first), "pairwise")]
 
@@ -534,11 +536,11 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 judge_objective=config.judge_objective,
             )
 
-            generator_verifiable_rewards = [
-                float(r["metrics"]["verifiable_reward"])
-                for r in generator_rollouts
-                if "verifiable_reward" in r["metrics"]
-            ]
+            generator_metrics: dict[str, list[float]] = {}
+            for rollout in generator_rollouts:
+                for key, value in rollout["metrics"].items():
+                    if value is not None:
+                        generator_metrics.setdefault(key, []).append(float(value))
             judge_rewards = [float(r["reward"]) for r in scored.judge_rollouts]
             generated_judge_rollouts = [
                 r for r in scored.judge_rollouts if r.get("info", {}).get("kind") == "generated"
@@ -587,8 +589,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 "train/judge/update_skipped": float(skip_judge_update),
                 "time/step": time.perf_counter() - step_start,
             }
-            if generator_verifiable_rewards:
-                log_values["train/generator/metrics/verifiable_reward/mean"] = fmean(generator_verifiable_rewards)
+            for key, values in generator_metrics.items():
+                log_values[f"train/generator/metrics/{key}/mean"] = fmean(values)
             max_completion_tokens = generator.sampling_args.get("max_completion_tokens")
             if max_completion_tokens:
                 log_values["train/generator/metrics/is_truncated/mean"] = fmean(
@@ -625,8 +627,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 f"Step {step} | Time: {time.perf_counter() - step_start:.2f}s | "
                 f"Gen reward: {log_values['train/generator/reward/mean']:.4f} | "
                 + (
-                    f"Gen verifiable: {fmean(generator_verifiable_rewards):.4f} | "
-                    if generator_verifiable_rewards
+                    f"Gen verifiable: {fmean(generator_metrics['verifiable_reward']):.4f} | "
+                    if "verifiable_reward" in generator_metrics
                     else ""
                 )
                 + f"Judge acc: {log_values['train/judge/reward/mean']:.4f} | "

@@ -31,7 +31,7 @@ def formula_atom_counts(formula: str) -> Counter[str]:
 
 
 class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
-    """SMILES-to-molecular-formula over the prepared ether0 dataset; the verifiable
+    """SMILES-to-molecular-formula over the prepared ether0 dataset. The verifiable
     reward is zero L1 atom-count distance to the target formula."""
 
     judge_task_label = "Chemistry question"
@@ -62,7 +62,7 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         candidate = self.adversarial_candidate_answer(completion)
-        # A candidate is well-formed when the formula regex tiles it exactly; the
+        # A candidate is well-formed when the formula regex tiles it exactly. The
         # verifiable reward is zero L1 atom-count distance to the target formula.
         formula_l1 = None
         if candidate:

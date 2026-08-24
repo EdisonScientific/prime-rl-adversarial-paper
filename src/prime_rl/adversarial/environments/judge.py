@@ -26,7 +26,7 @@ B if Candidate B is more likely to be the reference answer.
 
 
 class BinaryJudgeEnv(vf.SingleTurnEnv):
-    """One-token A/B judge; training labels are attached by the orchestrator."""
+    """One-token A/B judge. Training labels are attached by the orchestrator."""
 
     def __init__(self, pairwise: bool = False, **_: Any):
         super().__init__(

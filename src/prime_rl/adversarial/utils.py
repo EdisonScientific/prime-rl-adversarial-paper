@@ -18,8 +18,8 @@ ANSWER_RE = re.compile(r"\s*<answer>(.*?)</answer>\s*\Z", re.DOTALL | re.IGNOREC
 def latest_common_ckpt_step(generator_output_dir: Path, judge_output_dir: Path) -> int:
     """Latest step at which both roles have a trainer checkpoint. Both trainers
     train every step (checkpoint steps equal loop steps) unless the judge
-    update gate skipped an update before the crash — then their counters have
-    diverged and the run cannot be resumed consistently."""
+    update gate skipped an update before the crash. In that case their counters
+    have diverged and the run cannot be resumed consistently."""
     common_steps = set(get_all_ckpt_steps(get_ckpt_dir(generator_output_dir))) & set(
         get_all_ckpt_steps(get_ckpt_dir(judge_output_dir))
     )
@@ -31,7 +31,7 @@ def latest_common_ckpt_step(generator_output_dir: Path, judge_output_dir: Path) 
 
 
 def completion_text(completion: Any) -> str:
-    """Final message text; reasoning split off by a vllm reasoning parser is
+    """Final message text. Reasoning split off by a vllm reasoning parser is
     re-wrapped in <think> tags so parsed and raw completions look identical."""
     if isinstance(completion, str):
         return completion
@@ -49,7 +49,7 @@ def completion_text(completion: Any) -> str:
 
 def split_think(completion: Any) -> tuple[str, str]:
     """``(reasoning, rest)`` around the last ``</think>``. The opening ``<think>``
-    is optional — chat templates and thinking-budget interventions inject tags."""
+    is optional because chat templates and thinking-budget interventions inject tags."""
     text = completion_text(completion).strip()
     reasoning, sep, rest = text.rpartition("</think>")
     if not sep:
@@ -71,7 +71,7 @@ def extract_answer(completion: Any) -> str | None:
 
 
 def extract_choice(completion: Any) -> str | None:
-    """A/B judge choice; judges sample with structured outputs, so the completion is the bare letter."""
+    """A/B judge choice. Judges sample with structured outputs, so the completion is the bare letter."""
     _, rest = split_think(completion)
     choice = rest.strip().upper()
     return choice if choice in {"A", "B"} else None
