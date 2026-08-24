@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import Field, model_validator
 
@@ -38,57 +38,45 @@ from prime_rl.utils.config import BaseConfig
 
 
 class JudgeUpdateGateConfig(BaseConfig):
-    enabled: bool = False
-    """Skip judge updates while the judge is accurate enough."""
-
-    accuracy_threshold: float = Field(0.9, ge=0.0, le=1.0)
-    """Skip the judge update when the accuracy EMA is at or above this."""
-
-    ema_decay: float = Field(0.95, ge=0.0, lt=1.0)
-    """Decay of the judge-accuracy EMA the gate tracks."""
-
-    warmup_steps: int = Field(0, ge=0)
-    """Steps to always train the judge before the gate can skip."""
-
-    max_skip_streak: int | None = Field(20, ge=1)
-    """Force a judge update after this many consecutive skips. None never forces."""
+    enabled: bool = Field(False, description="Skip judge updates while the judge is accurate enough.")
+    accuracy_threshold: float = Field(0.9, ge=0.0, le=1.0, description="Skip when the accuracy EMA is at or above this.")
+    ema_decay: float = Field(0.95, ge=0.0, lt=1.0, description="Decay of the judge-accuracy EMA the gate tracks.")
+    warmup_steps: int = Field(0, ge=0, description="Steps to always train the judge before the gate can skip.")
+    max_skip_streak: int | None = Field(
+        20, ge=1, description="Force a judge update after this many consecutive skips. None never forces."
+    )
 
 
 class AdversarialRoleConfig(BaseConfig):
     trainer: TrainerConfig = TrainerConfig()
     orchestrator: AdversarialOrchestratorConfig = AdversarialOrchestratorConfig()
-    inference: InferenceConfig | None = None
-    """vLLM server for this role. None reuses an externally managed server."""
-
+    inference: InferenceConfig | None = Field(
+        None, description="vLLM server for this role. None reuses an externally managed server."
+    )
     output_dir: Path = Path("outputs")
-    clean: bool = False
-    """Wipe this role's output_dir before launch."""
-
+    clean: bool = Field(False, description="Wipe this role's output_dir before launch.")
     log: SharedLogConfig = SharedLogConfig()
-    model: SharedModelConfig | None = None
-    """Shared model name, propagated to trainer, orchestrator, and inference."""
-
-    tokenizer: TokenizerConfig | None = None
-    """Shared tokenizer, propagated to trainer and orchestrator."""
-
-    max_steps: int | None = None
-    """Shared step budget, propagated to trainer and orchestrator."""
-
-    seq_len: int | None = None
-    """Shared sequence length, propagated to trainer and orchestrator."""
-
-    weight_broadcast: SharedWeightBroadcastConfig | None = None
-    """Shared weight-broadcast transport, propagated to trainer, orchestrator, and inference."""
-
-    rollout_transport: TransportConfig | None = None
-    """Shared rollout transport, propagated to trainer and orchestrator."""
-
+    model: SharedModelConfig | None = Field(
+        None, description="Shared model name, propagated to trainer, orchestrator, and inference."
+    )
+    tokenizer: TokenizerConfig | None = Field(
+        None, description="Shared tokenizer, propagated to trainer and orchestrator."
+    )
+    max_steps: int | None = Field(None, description="Shared step budget, propagated to trainer and orchestrator.")
+    seq_len: int | None = Field(None, description="Shared sequence length, propagated to trainer and orchestrator.")
+    weight_broadcast: SharedWeightBroadcastConfig | None = Field(
+        None, description="Shared weight-broadcast transport, propagated to trainer, orchestrator, and inference."
+    )
+    rollout_transport: TransportConfig | None = Field(
+        None, description="Shared rollout transport, propagated to trainer and orchestrator."
+    )
     resume: ResumeConfig | None = None
-    deployment: DeploymentConfig = SingleNodeDeploymentConfig()
-    """GPU/node split between this role's trainer and inference."""
-
-    wandb: WandbMonitorConfig | None = None
-    """Shared W&B run, propagated to trainer and orchestrator monitors."""
+    deployment: DeploymentConfig = Field(
+        SingleNodeDeploymentConfig(), description="GPU/node split between this role's trainer and inference."
+    )
+    wandb: WandbMonitorConfig | None = Field(
+        None, description="Shared W&B run, propagated to trainer and orchestrator monitors."
+    )
 
     @model_validator(mode="after")
     def resolve_shared_fields(self):
@@ -153,23 +141,21 @@ class AdversarialRoleConfig(BaseConfig):
 class AdversarialRLConfig(BaseConfig):
     """Configures one synchronous generator/judge prototype run."""
 
-    generator: Annotated[AdversarialRoleConfig, Field(description="Generator RL run.")]
-    judge: Annotated[AdversarialRoleConfig, Field(description="Judge classifier run.")]
-    output_dir: Annotated[Path, Field(description="Top-level output directory.")] = Path("outputs/adversarial")
-    clean_output_dir: Annotated[bool, Field(description="Clean nested output dirs before launch.")] = False
-    generator_reward_mode: Annotated[
-        Literal["judge", "exact_only", "judge_times_exact"],
-        Field(
-            description=(
-                "Use judge feedback, sparse exact-only rewards, or judge-gated exact rewards."
-            )
+    generator: AdversarialRoleConfig = Field(description="Generator RL run.")
+    judge: AdversarialRoleConfig = Field(description="Judge classifier run.")
+    output_dir: Path = Field(Path("outputs/adversarial"), description="Top-level output directory.")
+    clean_output_dir: bool = Field(False, description="Clean nested output dirs before launch.")
+    generator_reward_mode: Literal["judge", "exact_only", "judge_times_exact"] = Field(
+        "judge", description="Use judge feedback, sparse exact-only rewards, or judge-gated exact rewards."
+    )
+    judge_objective: Literal["single_candidate", "pairwise"] = Field(
+        "single_candidate",
+        description=(
+            "single_candidate scores generated and reference answers separately (two judge calls per rollout); "
+            "pairwise shows the judge both in one prompt and picks the reference (one call per rollout; "
+            "requires pairwise = true in the judge env args)."
         ),
-    ] = "judge"
-    judge_objective: Literal["single_candidate", "pairwise"] = "single_candidate"
-    """``single_candidate``: the judge scores generated and reference answers separately
-    (two judge calls per rollout). ``pairwise``: the judge sees both in one prompt and
-    picks the reference (one call per rollout; requires ``pairwise = true`` in the judge env args)."""
-
+    )
     resume_step: int | None = Field(None, ge=1)
     judge_update_gate: JudgeUpdateGateConfig = JudgeUpdateGateConfig()
     log: SharedLogConfig = SharedLogConfig()

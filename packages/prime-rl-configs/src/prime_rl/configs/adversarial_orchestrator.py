@@ -26,35 +26,29 @@ class EnvConfig(BaseConfig):
     """Legacy-verifiers env; the v1 migration replaces this family with upstream imports."""
 
     id: str = "prime_rl.adversarial.envs"
-
     name: str | None = None
-
-    args: dict = {}
-    """Kwargs for ``vf.load_environment``."""
+    args: dict = Field({}, description="Kwargs for vf.load_environment.")
 
     @property
     def stripped_id(self) -> str:
-            return self.id.split("@")[0]
+        return self.id.split("@")[0]
 
     @property
     def resolved_name(self) -> str:
         return self.name or self.stripped_id
 
+
 class TrainConfig(BaseConfig):
     env: EnvConfig = EnvConfig()
-
     sampling: TrainSamplingConfig = TrainSamplingConfig()
-
     max_retries: int = Field(3, ge=0)
+
 
 class EvalConfig(BaseConfig):
     """Periodic generator eval on the env's eval dataset, using the train sampling args."""
 
-    num_examples: int = -1
-    """``-1`` uses all available examples."""
-
+    num_examples: int = Field(-1, description="-1 uses all available examples.")
     group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
-
     interval: int = Field(100, ge=1)
 
 
@@ -65,42 +59,31 @@ WeightBroadcastConfig: TypeAlias = Annotated[
 
 class OrchestratorConfig(BaseConfig):
     model: BaseModelConfig = BaseModelConfig()
-
     client: ClientConfig = ClientConfig()
-
     train: TrainConfig = TrainConfig()
-
     tokenizer: TokenizerConfig = TokenizerConfig()
-
-    renderer: RendererConfig = AutoRendererConfig()
-    """Renderer that tokenizes rollouts; ``auto`` resolves from the tokenizer name."""
-
+    renderer: RendererConfig = Field(
+        AutoRendererConfig(), description="Renderer that tokenizes rollouts; auto resolves from the tokenizer name."
+    )
     eval: EvalConfig | None = None
-
     log: LogConfig = LogConfig()
-
     wandb: WandbMonitorConfig | None = None
-
     weight_broadcast: WeightBroadcastConfig = FileSystemWeightBroadcastConfig()
-
     rollout_transport: TransportConfig = FileSystemTransportConfig()
-
-    output_dir: Path = Path("outputs")
-    """Root for this role's weights, rollouts, and logs; must match the trainer's."""
-
+    output_dir: Path = Field(
+        Path("outputs"), description="Root for this role's weights, rollouts, and logs; must match the trainer's."
+    )
     batch_size: int | None = Field(None, ge=1)
-
     seed: int | None = None
-
     pad_to_multiple_of: int = Field(1, ge=1)
-
-    group_size: int = Field(1, ge=1, validation_alias=AliasChoices("group_size", "rollouts_per_example"))
-    """Rollouts per example (the GRPO group)."""
-
+    group_size: int = Field(
+        1,
+        ge=1,
+        validation_alias=AliasChoices("group_size", "rollouts_per_example"),
+        description="Rollouts per example (the GRPO group).",
+    )
     seq_len: int = 2048
-
     num_train_workers: int = Field(1, ge=1)
-
     max_steps: int | None = None
 
     @model_validator(mode="after")
