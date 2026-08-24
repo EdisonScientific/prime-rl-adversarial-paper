@@ -3,7 +3,7 @@ generator_reward_mode = "judge"
 judge_objective = "pairwise"
 
 [generator]
-max_steps = 100
+max_steps = 2000
 seq_len = 4096
 
 [generator.model]
@@ -39,7 +39,7 @@ extra_body = { chat_template_kwargs = { enable_thinking = true } }
 [generator.orchestrator.train.env]
 id = "prime_rl.adversarial.envs"
 name = "adversarial_generator"
-args = { kind = "generator", task = "multiplication", n_digits = 4, num_examples = 512, seed = 1 }
+args = { kind = "generator", task = "multiplication", n_digits = 4, num_examples = 5000, seed = 1 }
 
 [generator.inference.server]
 port = 8000
@@ -48,7 +48,7 @@ port = 8000
 max_model_len = 4096
 
 [judge]
-max_steps = 100
+max_steps = 2000
 seq_len = 2048
 
 [judge.model]
