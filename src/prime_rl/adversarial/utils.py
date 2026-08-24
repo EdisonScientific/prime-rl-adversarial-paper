@@ -57,12 +57,10 @@ def split_think(completion: Any) -> tuple[str, str]:
     return reasoning.removeprefix("<think>").strip(), rest
 
 
-def extract_answer(completion: Any, *, require_think: bool = True) -> str | None:
-    """The ``<answer>...</answer>`` payload, or None when the completion is not a
-    reasoning block (when required) followed by exactly one answer block."""
-    reasoning, rest = split_think(completion)
-    if require_think and not reasoning:
-        return None
+def extract_answer(completion: Any) -> str | None:
+    """The ``<answer>...</answer>`` payload, or None when the completion (after an
+    optional reasoning block) is not exactly one answer block."""
+    _, rest = split_think(completion)
     match = ANSWER_RE.fullmatch(rest)
     if match is None:
         return None

@@ -56,9 +56,7 @@ def countdown_files(text: str) -> dict[str, str] | None:
 
 
 def countdown_load_json_from_response(completion: Any) -> dict[str, str] | None:
-    reasoning, rest = split_think(completion)
-    if not reasoning:
-        return None
+    _, rest = split_think(completion)
     return countdown_files(rest.strip())
 
 

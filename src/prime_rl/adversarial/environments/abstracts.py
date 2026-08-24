@@ -76,7 +76,7 @@ class PaperAbstractGeneratorEnv(GeneratorEnv):
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
         # Raw text: the judge should see the real formatting, newlines included.
-        return extract_answer(completion, require_think=False)
+        return extract_answer(completion)
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         reference = self.adversarial_reference_answer(example)
