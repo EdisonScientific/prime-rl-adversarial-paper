@@ -55,20 +55,19 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
             system_prompt=MULTIPLICATION_GENERATOR_SYSTEM_PROMPT,
         )
 
-    def adversarial_candidate_answer(self, completion: Any) -> int | None:
+    def adversarial_candidate_answer(self, completion: Any) -> str | None:
+        # Raw answer text: the judge sees exactly what the generator wrote.
         answer = extract_answer(completion)
-        if answer is None:
+        if answer is None or not INTEGER_RE.fullmatch(answer.strip()):
             return None
-        answer = answer.strip()
-        if not INTEGER_RE.fullmatch(answer):
-            return None
-        return int(answer.replace(",", ""))
+        return answer
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         target = int((example.get("info") or {})["product"])
-        parsed = self.adversarial_candidate_answer(completion)
-        format_ok = parsed is not None
-        return self.generator_result(parsed, format_ok, float(format_ok and parsed == target))
+        candidate = self.adversarial_candidate_answer(completion)
+        format_ok = candidate is not None
+        verifiable = float(format_ok and int(candidate.strip().replace(",", "")) == target)
+        return self.generator_result(candidate, format_ok, verifiable)
 
 
 def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:

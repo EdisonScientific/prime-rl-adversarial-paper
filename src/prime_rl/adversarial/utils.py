@@ -79,10 +79,6 @@ def extract_choice(completion: Any) -> str | None:
     return choice if choice in {"A", "B"} else None
 
 
-def collapse_whitespace(text: str) -> str:
-    return " ".join(str(text).strip().split())
-
-
 def get_model_completion_len(output: vf.RolloutOutput) -> int:
     """Sum of model-generated completion tokens across all turns (excludes
     environment-injected tokens between turns)."""

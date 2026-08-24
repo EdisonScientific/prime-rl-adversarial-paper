@@ -11,7 +11,7 @@ from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
-from prime_rl.adversarial.utils import collapse_whitespace, extract_answer
+from prime_rl.adversarial.utils import extract_answer
 
 FORMULA_RE = re.compile(r"([A-Z][a-z]?)(\d*)")
 
@@ -100,11 +100,8 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
         )
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
-        answer = extract_answer(completion)
-        if answer is None:
-            return None
-        answer = collapse_whitespace(answer)
-        return answer or None
+        # Raw answer text: the judge sees exactly what the generator wrote.
+        return extract_answer(completion) or None
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         info = example.get("info") or {}
