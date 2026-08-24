@@ -1,9 +1,10 @@
 import ast
 import os
+import random
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -11,11 +12,27 @@ import pyarrow.ipc as pa_ipc
 import verifiers as vf
 from datasets import Dataset, load_dataset
 
-from prime_rl.adversarial.environments.base import GeneratorEnv, make_example, reservoir_sample
+from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
 from prime_rl.adversarial.utils import collapse_whitespace, extract_answer
 
 FORMULA_RE = re.compile(r"([A-Z][a-z]?)(\d*)")
+
+
+def reservoir_sample(rows: Iterable[dict[str, Any]], num_examples: int | None, seed: int) -> list[dict[str, Any]]:
+    """Uniform one-pass sample of ``num_examples`` rows (``None`` keeps everything)."""
+    if num_examples is None:
+        return list(rows)
+    rng = random.Random(seed)
+    sample: list[dict[str, Any]] = []
+    for num_seen, row in enumerate(rows, start=1):
+        if len(sample) < num_examples:
+            sample.append(row)
+        else:
+            replacement_index = rng.randrange(num_seen)
+            if replacement_index < num_examples:
+                sample[replacement_index] = row
+    return sample
 
 ETHER0_SMILES_TO_FORMULA_SYSTEM_PROMPT = """\
 You are a careful chemistry assistant. Given a SMILES string, compute its molecular formula exactly.

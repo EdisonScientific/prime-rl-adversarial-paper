@@ -1,5 +1,4 @@
-import random
-from typing import Any, Iterable
+from typing import Any
 
 import verifiers as vf
 
@@ -12,22 +11,6 @@ def make_example(example_id: int, question: str, answer: str, info: dict[str, An
         "answer": answer,
         "info": {"question": question, "reference": answer, **(info or {})},
     }
-
-
-def reservoir_sample(rows: Iterable[dict[str, Any]], num_examples: int | None, seed: int) -> list[dict[str, Any]]:
-    """Uniform one-pass sample of ``num_examples`` rows (``None`` keeps everything)."""
-    if num_examples is None:
-        return list(rows)
-    rng = random.Random(seed)
-    sample: list[dict[str, Any]] = []
-    for num_seen, row in enumerate(rows, start=1):
-        if len(sample) < num_examples:
-            sample.append(row)
-        else:
-            replacement_index = rng.randrange(num_seen)
-            if replacement_index < num_examples:
-                sample[replacement_index] = row
-    return sample
 
 
 class GeneratorEnv(vf.SingleTurnEnv):
