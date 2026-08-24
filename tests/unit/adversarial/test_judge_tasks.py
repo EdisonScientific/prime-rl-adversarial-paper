@@ -1,3 +1,5 @@
+import pytest
+
 from prime_rl.adversarial.orchestrator import (
     generated_win_probability,
     pairwise_judge_tasks,
@@ -28,5 +30,5 @@ def test_pairwise_label_is_the_reference_slot():
 def test_generated_win_probability_follows_the_generated_slot():
     # First-task label 0 means the generated answer occupies slot A, in both objectives.
     assert generated_win_probability(0.8, first_label=0.0) == 0.8
-    assert generated_win_probability(0.8, first_label=1.0) == 0.19999999999999996
+    assert generated_win_probability(0.8, first_label=1.0) == pytest.approx(0.2)
     assert generated_win_probability(None, first_label=0.0) is None
