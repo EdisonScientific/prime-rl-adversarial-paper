@@ -584,6 +584,11 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 "train/judge/update_skipped": float(skip_judge_update),
                 "time/step": time.perf_counter() - step_start,
             }
+            max_completion_tokens = generator.sampling_args.get("max_completion_tokens")
+            if max_completion_tokens:
+                log_values["train/generator/metrics/is_truncated/mean"] = fmean(
+                    float(length >= max_completion_tokens) for length in generator_completion_lens
+                )
             # Per-kind accuracy only exists for single-candidate judging.
             if generated_judge_rewards:
                 log_values["train/judge/metrics/generated_accuracy/mean"] = fmean(generated_judge_rewards)

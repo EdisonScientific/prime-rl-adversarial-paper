@@ -216,7 +216,14 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
         clean_future_steps(role_config.output_dir, resume_step)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    config.generator.trainer.monitors.wandb = None
+    # The orchestrator and the generator trainer share one W&B run (wandb shared
+    # mode); the judge trainer stays muted — the orchestrator logs the watched
+    # judge metrics. The run id persists in the output dir so resumed runs
+    # continue the same W&B run.
+    run_id_file = config.output_dir / "wandb_run_id"
+    if not run_id_file.exists():
+        run_id_file.write_text(uuid.uuid4().hex)
+    wandb_shared_env = {"WANDB_SHARED_MODE": "1", "WANDB_RUN_ID": run_id_file.read_text().strip()}
     config.judge.trainer.monitors.wandb = None
     pre_download_model(
         config.generator.trainer.model.name,
@@ -298,6 +305,7 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
                 ],
                 log_dir / f"{role}_trainer.log",
                 {
+                    **(wandb_shared_env if role == GENERATOR else {}),
                     "WANDB_SHARED_LABEL": f"{role}_trainer",
                     "CUDA_VISIBLE_DEVICES": ",".join(map(str, allocation[role]["trainer"])),
                     "PYTHONUNBUFFERED": "1",
@@ -321,6 +329,7 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
             ],
             log_dir / "adversarial_orchestrator.log",
             {
+                **wandb_shared_env,
                 "WANDB_SHARED_LABEL": "orchestrator",
                 "LOGURU_FORCE_COLORS": "1",
                 "WANDB_PROGRAM": "uv run adversarial-rl",
