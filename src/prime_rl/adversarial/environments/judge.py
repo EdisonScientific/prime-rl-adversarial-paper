@@ -38,11 +38,8 @@ class BinaryJudgeEnv(vf.SingleTurnEnv):
     async def judge_reward(self, completion, answer, **kwargs) -> float:
         return float(extract_choice(completion) == str(answer).strip().upper())
 
-    def adversarial_choice(self, completion: Any) -> str | None:
-        return extract_choice(completion)
-
     def adversarial_reference_probability_proxy(self, rollout: vf.RolloutOutput) -> float | None:
-        choice = self.adversarial_choice(rollout.get("completion"))
+        choice = extract_choice(rollout.get("completion"))
         if choice is None:
             return None
         trajectory = rollout.get("trajectory") or []

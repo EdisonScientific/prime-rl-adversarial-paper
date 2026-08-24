@@ -37,10 +37,14 @@ def normalized_text_key(text: str) -> str:
 def build_paper_abstract_dataset(
     dataset_path: str,
     abstract_field: str | None = None,
+    domain: str | None = None,
+    min_words: int | None = None,
+    max_words: int | None = None,
     num_examples: int | None = 10_000,
     seed: int = 0,
 ) -> Dataset:
-    """Load abstracts from a prepared JSONL file (one object per line), dedupe, and sample."""
+    """Load abstracts from a prepared JSONL file (one object per line), dedupe, and sample.
+    ``domain`` keeps rows whose domain/field/category value contains it (case-insensitive)."""
     path = os.path.expanduser(dataset_path)
     field_names = (abstract_field,) if abstract_field else ABSTRACT_FIELD_NAMES
     abstracts: list[str] = []
@@ -50,12 +54,19 @@ def build_paper_abstract_dataset(
             if not line.strip():
                 continue
             record = json.loads(line)
+            if domain is not None:
+                haystack = " ".join(str(record.get(name, "")) for name in ("domain", "field", "category")).lower()
+                if domain.lower() not in haystack:
+                    continue
             abstract = next((str(record[name]) for name in field_names if record.get(name)), None)
             if abstract is None:
                 continue
             abstract = abstract.strip()
             key = normalized_text_key(abstract)
             if not key or key in seen:
+                continue
+            word_count = len(key.split())
+            if (min_words is not None and word_count < min_words) or (max_words is not None and word_count > max_words):
                 continue
             seen.add(key)
             abstracts.append(abstract)
@@ -78,20 +89,28 @@ class PaperAbstractGeneratorEnv(GeneratorEnv):
         dataset_path: str,
         eval_dataset_path: str | None = None,
         abstract_field: str | None = None,
-        num_examples: int | None = 10_000,
+        domain: str | None = None,
+        min_words: int | None = None,
+        max_words: int | None = None,
+        num_examples: int = 10_000,
         num_eval_examples: int | None = None,
         seed: int = 0,
         **_: Any,
     ):
-        eval_dataset = None
+        build_args = dict(abstract_field=abstract_field, domain=domain, min_words=min_words, max_words=max_words)
         if eval_dataset_path is not None:
+            dataset = build_paper_abstract_dataset(dataset_path, num_examples=num_examples, seed=seed, **build_args)
             eval_dataset = build_paper_abstract_dataset(
-                eval_dataset_path, abstract_field=abstract_field, num_examples=num_eval_examples, seed=seed + 1
+                eval_dataset_path, num_examples=num_eval_examples, seed=seed + 1, **build_args
             )
+        else:
+            # Single-source setup: hold the eval split out of the train sample.
+            total = num_examples + (num_eval_examples or 0)
+            full = build_paper_abstract_dataset(dataset_path, num_examples=total, seed=seed, **build_args)
+            dataset = full.select(range(num_examples))
+            eval_dataset = full.select(range(num_examples, total)) if num_eval_examples else None
         super().__init__(
-            dataset=build_paper_abstract_dataset(
-                dataset_path, abstract_field=abstract_field, num_examples=num_examples, seed=seed
-            ),
+            dataset=dataset,
             eval_dataset=eval_dataset,
             system_prompt=PAPER_ABSTRACT_GENERATOR_SYSTEM_PROMPT,
         )
@@ -113,4 +132,4 @@ def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
         return PaperAbstractGeneratorEnv(**kwargs)
     if kind == "judge":
         return BinaryJudgeEnv(**kwargs)
-    raise ValueError("grant_abstract adversarial env kind must be generator or judge.")
+    raise ValueError("abstracts adversarial env kind must be generator or judge.")

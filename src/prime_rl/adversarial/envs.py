@@ -2,8 +2,8 @@ from typing import Any
 
 import verifiers as vf
 
+from prime_rl.adversarial.environments.abstracts import load_environment as load_abstracts
 from prime_rl.adversarial.environments.countdown_code import load_environment as load_countdown_code
-from prime_rl.adversarial.environments.grant_abstract import load_environment as load_grant_abstract
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
 from prime_rl.adversarial.environments.multiplication import load_environment as load_multiplication
 from prime_rl.adversarial.environments.smiles_to_formula import load_environment as load_smiles_to_formula
@@ -13,7 +13,8 @@ _GENERATOR_LOADERS = {
     "countdown_code": load_countdown_code,
     "ether0_smiles_to_formula": load_smiles_to_formula,
     "smiles_to_formula": load_smiles_to_formula,
-    "grant_abstract": load_grant_abstract,
+    "grant_abstract": load_abstracts,
+    "paper_abstract": load_abstracts,
 }
 
 

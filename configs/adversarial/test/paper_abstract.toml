@@ -1,0 +1,12 @@
+output_dir = "outputs/adversarial-test-paper-abstract"
+
+[generator.wandb]
+name = "adversarial-test-paper-abstract"
+
+[generator.orchestrator.eval]
+interval = 250
+num_examples = 800
+group_size = 1
+
+[generator.orchestrator.train.env]
+args = { task = "paper_abstract", dataset_path = "/home/abou/data/datasets/paper_abstracts/titles_abstracts.enriched.jsonl", domain = "medicine", min_words = 50, max_words = 350, num_examples = 5000, num_eval_examples = 800, seed = 1 }

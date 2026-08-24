@@ -24,20 +24,6 @@ Stop immediately after the closing answer tag.
 """
 
 
-def build_multiplication_dataset(n_digits: int, num_examples: int, seed: int) -> Dataset:
-    rng = random.Random(seed)
-    low = 0 if n_digits == 1 else 10 ** (n_digits - 1)
-    high = 10**n_digits - 1
-    rows = []
-    for example_id in range(num_examples):
-        left = rng.randint(low, high)
-        right = rng.randint(low, high)
-        product = left * right
-        question = f"What is {left} multiplied by {right}?"
-        rows.append(make_example(example_id, question, str(product), info={"product": product}))
-    return Dataset.from_list(rows)
-
-
 class MultiplicationGeneratorEnv(GeneratorEnv):
     """Four-digit multiplication env used by the adversarial experiments."""
 
@@ -51,8 +37,18 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
         seed: int = 0,
         **_: Any,
     ):
+        # Sample n-digit factor pairs; the eval split is held out of the same draw.
         total = num_examples + (num_eval_examples or 0)
-        dataset = build_multiplication_dataset(n_digits=n_digits, num_examples=total, seed=seed)
+        rng = random.Random(seed)
+        low = 0 if n_digits == 1 else 10 ** (n_digits - 1)
+        high = 10**n_digits - 1
+        rows = []
+        for example_id in range(total):
+            left = rng.randint(low, high)
+            right = rng.randint(low, high)
+            question = f"What is {left} multiplied by {right}?"
+            rows.append(make_example(example_id, question, str(left * right), info={"product": left * right}))
+        dataset = Dataset.from_list(rows)
         super().__init__(
             dataset=dataset.select(range(num_examples)),
             eval_dataset=dataset.select(range(num_examples, total)) if num_eval_examples else None,

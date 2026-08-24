@@ -40,28 +40,6 @@ def formula_atom_counts(formula: str) -> Counter[str]:
     return counts
 
 
-def parse_formula_counts(formula: str | None) -> Counter[str] | None:
-    if formula is None:
-        return None
-    text = collapse_whitespace(formula)
-    if not text:
-        return None
-    parts = list(FORMULA_RE.finditer(text))
-    if not parts or "".join(match.group(0) for match in parts) != text:
-        return None
-    return formula_atom_counts(text)
-
-
-def formula_l1_to_target(candidate_formula: str | None, solution: str) -> float | None:
-    """L1 atom-count distance between candidate and target; None when the candidate is not a valid formula."""
-    candidate_counts = parse_formula_counts(candidate_formula)
-    if candidate_counts is None:
-        return None
-    target_counts = formula_atom_counts(ether0_target_formula(solution))
-    elements = set(candidate_counts) | set(target_counts)
-    return float(sum(abs(candidate_counts[element] - target_counts[element]) for element in elements))
-
-
 def ether0_target_formula(solution: str) -> str:
     """Target formula from an ether0 solution string (``fxn_name!:!answer_info!:!problem_type``)."""
     fxn_name, answer_info, _ = solution.split("!:!")
@@ -80,36 +58,6 @@ def ether0_target_formula(solution: str) -> str:
     raise ValueError(f"Ether0 adversarial env only supports formula rewards for now, got {fxn_name!r}.")
 
 
-def build_ether0_smiles_to_formula_dataset(
-    dataset_name: str,
-    split: str,
-    problem_type: str,
-    num_examples: int,
-    seed: int,
-) -> Dataset:
-    token = os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("HF_TOKEN")
-    source = load_dataset(dataset_name, split=split, token=token)
-    if problem_type:
-        source = source.filter(lambda row: row["problem_type"] == problem_type)
-    source = source.shuffle(seed=seed).select(range(num_examples))
-
-    rows = []
-    for example_id, row in enumerate(source):
-        reference_smiles = row["ideal"]
-        solution = row["solution"]
-        target_formula = ether0_target_formula(solution)
-        question = "Compute the molecular formula for this SMILES string.\n\n" f"SMILES:\n{reference_smiles}"
-        rows.append(
-            make_example(
-                example_id,
-                question,
-                target_formula,
-                info={"reference_smiles": reference_smiles, "solution": solution},
-            )
-        )
-    return Dataset.from_list(rows)
-
-
 class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
     """Ether0 diagnostic env: compute molecular formulas from reference SMILES."""
 
@@ -126,8 +74,25 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
         seed: int = 0,
         **_: Any,
     ):
+        # Sample ether0 rows of the requested problem type and turn each into a
+        # SMILES-to-formula question; the eval split is held out of the same draw.
         total = num_examples + (num_eval_examples or 0)
-        dataset = build_ether0_smiles_to_formula_dataset(dataset_name, split, problem_type, total, seed)
+        token = os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("HF_TOKEN")
+        source = load_dataset(dataset_name, split=split, token=token)
+        if problem_type:
+            source = source.filter(lambda row: row["problem_type"] == problem_type)
+        rows = []
+        for example_id, row in enumerate(source.shuffle(seed=seed).select(range(total))):
+            question = "Compute the molecular formula for this SMILES string.\n\n" f"SMILES:\n{row['ideal']}"
+            rows.append(
+                make_example(
+                    example_id,
+                    question,
+                    ether0_target_formula(row["solution"]),
+                    info={"reference_smiles": row["ideal"], "solution": row["solution"]},
+                )
+            )
+        dataset = Dataset.from_list(rows)
         super().__init__(
             dataset=dataset.select(range(num_examples)),
             eval_dataset=dataset.select(range(num_examples, total)) if num_eval_examples else None,
@@ -144,7 +109,16 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         info = example.get("info") or {}
         candidate = self.adversarial_candidate_answer(completion)
-        formula_l1 = formula_l1_to_target(candidate, info["solution"])
+        # A candidate is well-formed when the formula regex tiles it exactly; the
+        # verifiable reward is zero L1 atom-count distance to the target formula.
+        formula_l1 = None
+        if candidate:
+            parts = list(FORMULA_RE.finditer(candidate))
+            if parts and "".join(match.group(0) for match in parts) == candidate:
+                candidate_counts = formula_atom_counts(candidate)
+                target_counts = formula_atom_counts(ether0_target_formula(info["solution"]))
+                elements = set(candidate_counts) | set(target_counts)
+                formula_l1 = float(sum(abs(candidate_counts[el] - target_counts[el]) for el in elements))
         return self.generator_result(candidate, formula_l1 is not None, float(formula_l1 == 0.0))
 
 
