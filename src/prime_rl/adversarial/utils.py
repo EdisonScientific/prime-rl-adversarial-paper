@@ -4,6 +4,7 @@ from typing import Any
 
 import orjson
 import verifiers as vf
+from renderers.base import build_trajectory_step
 from verifiers.utils.save_utils import make_serializable
 
 from prime_rl.transports.batch.types import TrainingSample
@@ -92,8 +93,6 @@ def _clean_messages(messages: Any, default_role: str) -> list[dict[str, Any]]:
 
 def backfill_rollout_tokens(output: vf.RolloutOutput, renderer) -> None:
     """Populate missing step tokens from prompt/completion messages via the renderer."""
-    from renderers.base import build_trajectory_step
-
     for step in output["trajectory"]:
         if step["tokens"] is None:
             prompt = _clean_messages(step.get("prompt"), "user")

@@ -3,6 +3,7 @@ from typing import Annotated, TypeAlias
 
 from pydantic import AliasChoices, Field, model_validator
 from renderers import AutoRendererConfig, RendererConfig
+from renderers.base import MODEL_RENDERER_MAP
 
 from prime_rl.configs.monitors import WandbMonitorConfig
 from prime_rl.configs.orchestrator import (
@@ -115,8 +116,6 @@ class OrchestratorConfig(BaseConfig):
         """Reject the silent DefaultRenderer fallback at config time."""
         if self.renderer.name != "auto":
             return self
-        from renderers.base import MODEL_RENDERER_MAP
-
         model_id = self.tokenizer.name or self.model.name
         if model_id not in MODEL_RENDERER_MAP:
             raise ValueError(

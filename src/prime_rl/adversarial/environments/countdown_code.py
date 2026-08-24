@@ -4,11 +4,10 @@ import os
 import subprocess
 import sys
 from fractions import Fraction
-from pathlib import Path
 from typing import Any
 
 import verifiers as vf
-from datasets import Dataset, load_dataset, load_from_disk
+from datasets import Dataset, load_dataset
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
@@ -79,16 +78,6 @@ def countdown_prompt(numbers: list[int], target: int) -> str:
     )
 
 
-def countdown_reference_json(numbers: list[int], target: int, expr: str) -> str:
-    return json.dumps(
-        {
-            "solution.py": countdown_solution_py(numbers, target, expr),
-            "test.py": COUNTDOWN_TEST_PY,
-        },
-        sort_keys=True,
-    )
-
-
 def countdown_find_expression(numbers: list[int], target: int) -> str | None:
     items = [(Fraction(number), str(number)) for number in numbers]
 
@@ -119,12 +108,9 @@ def countdown_find_expression(numbers: list[int], target: int) -> str | None:
     return search(items)
 
 
-def countdown_load_json_from_response(completion: Any) -> dict[str, str] | None:
-    reasoning, rest = split_think(completion)
-    if not reasoning:
-        return None
+def countdown_files(text: str) -> dict[str, str] | None:
     try:
-        parsed = json.loads(rest.strip())
+        parsed = json.loads(text)
     except json.JSONDecodeError:
         return None
     if not isinstance(parsed, dict):
@@ -136,26 +122,11 @@ def countdown_load_json_from_response(completion: Any) -> dict[str, str] | None:
     return None
 
 
-def countdown_files_from_reference(reference: Any) -> dict[str, str] | None:
-    if isinstance(reference, dict):
-        solution = reference.get("solution.py")
-        test = reference.get("test.py")
-        if isinstance(solution, str) and isinstance(test, str):
-            return {"solution.py": solution, "test.py": test}
-    if isinstance(reference, str):
-        try:
-            parsed = json.loads(reference)
-        except json.JSONDecodeError:
-            return None
-        return countdown_files_from_reference(parsed)
-    return None
-
-
-def countdown_clean_code(code: str) -> str:
-    try:
-        return code.encode().decode("unicode_escape")
-    except UnicodeDecodeError:
-        return code
+def countdown_load_json_from_response(completion: Any) -> dict[str, str] | None:
+    reasoning, rest = split_think(completion)
+    if not reasoning:
+        return None
+    return countdown_files(rest.strip())
 
 
 def countdown_extract_expr(solution_py: str) -> str | None:
@@ -173,8 +144,8 @@ def countdown_extract_expr(solution_py: str) -> str | None:
 def countdown_proxy_reward(files: dict[str, str] | None) -> float:
     if files is None:
         return 0.0
-    solution = countdown_clean_code(files["solution.py"].strip())
-    test = countdown_clean_code(files["test.py"].strip())
+    solution = files["solution.py"].strip()
+    test = files["test.py"].strip()
     if not solution or not test:
         return 0.2
     script = (
@@ -205,85 +176,52 @@ def countdown_judge_task(numbers: list[int], target: int) -> str:
 
 
 def countdown_compact_judge_candidate(candidate: str) -> tuple[str, str]:
-    files = countdown_files_from_reference(candidate)
+    files = countdown_files(candidate)
     if files is None:
         return "<unparseable>", "unknown"
     try:
-        expr = countdown_extract_expr(countdown_clean_code(files["solution.py"].strip()))
+        expr = countdown_extract_expr(files["solution.py"].strip())
     except Exception:
         expr = None
-    test = countdown_clean_code(files["test.py"].strip())
-    test_modified = test.strip() != COUNTDOWN_TEST_PY.strip()
+    test_modified = files["test.py"].strip() != COUNTDOWN_TEST_PY.strip()
     return expr if expr is not None else "<missing or invalid expr>", "yes" if test_modified else "no"
 
 
-def countdown_reference_from_row(row: dict[str, Any], numbers: list[int], target: int) -> str:
-    """Reference solution JSON. Prepared datasets carry solutions that were
-    gold-verified at generation time; raw sources without one are solved here."""
-    reference = row.get("solution") or row.get("reference_solution") or row.get("reference")
-    if reference is None:
-        expr = countdown_find_expression(numbers, target)
-    else:
-        files = countdown_files_from_reference(reference)
-        expr = countdown_extract_expr(countdown_clean_code(files["solution.py"].strip()))
+def countdown_reference(numbers: list[int], target: int) -> str:
+    expr = countdown_find_expression(numbers, target)
     if expr is None:
-        raise ValueError(f"Countdown example has no usable reference expr: numbers={numbers}, target={target}")
-    return countdown_reference_json(numbers, target, expr)
-
-
-def countdown_rows(dataset) -> list[dict[str, Any]]:
-    rows = []
-    for example_id, row in enumerate(dataset):
-        numbers = [int(number) for number in row["nums"]]
-        target = int(row["target"])
-        reference = countdown_reference_from_row(row, numbers, target)
-        question = countdown_prompt(numbers, target)
-        rows.append(make_example(example_id, question, reference, info={"numbers": numbers, "target": target}))
-    return rows
-
-
-def load_countdown_source_datasets(dataset_name: str, split: str, seed: int) -> tuple[Dataset, Dataset | None]:
-    source_path = Path(dataset_name)
-    if source_path.exists():
-        loaded = load_from_disk(str(source_path))
-        if isinstance(loaded, Dataset):
-            return loaded.shuffle(seed=seed), None
-        eval_dataset = loaded["eval"].shuffle(seed=seed) if "eval" in loaded and split == "train" else None
-        return loaded[split].shuffle(seed=seed), eval_dataset
-
-    token = os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("HF_TOKEN")
-    return load_dataset(dataset_name, split=split, token=token).shuffle(seed=seed), None
+        raise ValueError(f"No countdown expression reaches the target: numbers={numbers}, target={target}")
+    return json.dumps(
+        {
+            "solution.py": countdown_solution_py(numbers, target, expr),
+            "test.py": COUNTDOWN_TEST_PY,
+        },
+        sort_keys=True,
+    )
 
 
 def build_countdown_code_datasets(
-    dataset_name: str = "Jiayi-Pan/Countdown-Tasks-3to4",
-    split: str = "train",
-    num_examples: int | None = 15_000,
-    num_eval_examples: int | None = 800,
-    seed: int = 0,
+    dataset_name: str,
+    split: str,
+    num_examples: int,
+    num_eval_examples: int | None,
+    seed: int,
 ) -> tuple[Dataset, Dataset | None]:
-    requested_examples = (num_examples or 0) + (num_eval_examples or 0)
-    dataset, source_eval_dataset = load_countdown_source_datasets(dataset_name, split, seed)
-    if source_eval_dataset is None and requested_examples and len(dataset) > requested_examples:
-        dataset = dataset.select(range(requested_examples))
-    elif source_eval_dataset is not None and num_examples is not None and len(dataset) > num_examples:
-        dataset = dataset.select(range(num_examples))
-    if source_eval_dataset is not None and num_eval_examples is not None and len(source_eval_dataset) > num_eval_examples:
-        source_eval_dataset = source_eval_dataset.select(range(num_eval_examples))
+    token = os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("HF_TOKEN")
+    total = num_examples + (num_eval_examples or 0)
+    source = load_dataset(dataset_name, split=split, token=token).shuffle(seed=seed).select(range(total))
 
-    rows = countdown_rows(dataset)
-    if num_examples is None:
-        return Dataset.from_list(rows), None
-    train_rows = rows[:num_examples]
-    if source_eval_dataset is None:
-        eval_rows = rows[num_examples : num_examples + (num_eval_examples or 0)]
-    else:
-        eval_rows = countdown_rows(source_eval_dataset)[: num_eval_examples or 0]
-    if num_eval_examples and len(eval_rows) < num_eval_examples:
-        raise ValueError(
-            f"Countdown-Code eval split requested {num_eval_examples} examples but only {len(eval_rows)} are available."
-        )
-    return Dataset.from_list(train_rows), Dataset.from_list(eval_rows) if eval_rows else None
+    rows = []
+    for example_id, row in enumerate(source):
+        numbers = [int(number) for number in row["nums"]]
+        target = int(row["target"])
+        reference = countdown_reference(numbers, target)
+        question = countdown_prompt(numbers, target)
+        rows.append(make_example(example_id, question, reference, info={"numbers": numbers, "target": target}))
+
+    train_dataset = Dataset.from_list(rows[:num_examples])
+    eval_dataset = Dataset.from_list(rows[num_examples:]) if num_eval_examples else None
+    return train_dataset, eval_dataset
 
 
 class CountdownCodeGeneratorEnv(GeneratorEnv):
@@ -293,7 +231,7 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
         self,
         dataset_name: str = "Jiayi-Pan/Countdown-Tasks-3to4",
         split: str = "train",
-        num_examples: int | None = 15_000,
+        num_examples: int = 15_000,
         num_eval_examples: int | None = 800,
         seed: int = 0,
         **_: Any,
@@ -312,10 +250,8 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
         )
 
     def adversarial_question(self, example: dict[str, Any]) -> str:
-        info = example.get("info") or {}
-        if "numbers" in info and "target" in info:
-            return countdown_judge_task([int(number) for number in info["numbers"]], int(info["target"]))
-        return str(info.get("question") or example["prompt"][-1]["content"])
+        info = example["info"]
+        return countdown_judge_task([int(number) for number in info["numbers"]], int(info["target"]))
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
         files = countdown_load_json_from_response(completion)
@@ -348,4 +284,3 @@ def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
     if kind == "judge":
         return BinaryJudgeEnv(**kwargs)
     raise ValueError("countdown_code adversarial env kind must be generator or judge.")
-
