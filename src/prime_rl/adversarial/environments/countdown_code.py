@@ -1,9 +1,7 @@
 import ast
 import json
-import os
 import subprocess
 import sys
-from fractions import Fraction
 from typing import Any
 
 import verifiers as vf
@@ -42,63 +40,6 @@ def verify_solution(numbers, target, expr) -> bool:
         return False
 """
 
-COUNTDOWN_PROMPT_TEMPLATE = (
-    "You are to play a variation of the game of Countdown which involves the use of Python.\n"
-    "You will be provided code in two scripts: one where you see the inputs and write your solution "
-    "(`solution.py`), and the other being the test suite (`test.py`).\n"
-    "Your solution is to reach the target number by applying arithmetic operations on the provided input.\n"
-    "You can use basic arithmetic operations (+, -, *, /) and each number must be used once "
-    "(you cannot ignore numbers nor re-use them).\n"
-    "You MUST ensure the test cases pass.\n"
-    "Think privately if useful, then return all files as valid JSON.\n"
-    "You will be provided the two files in their entirety, and you must output the edited versions "
-    "of them with your solution.\n"
-    "Here is the environment for you to work with: recall you have to edit the file with a solution "
-    "such that the test passes.\n\n"
-    "```\n"
-    "{files_json}\n"
-    "```\n\n"
-    "Your response must be exactly one JSON object of the form:\n"
-    "```\n"
-    "{{ ...json here... }}\n"
-    "```"
-)
-
-
-def countdown_solution_py(numbers: list[int], target: int, expr: str | None) -> str:
-    expr_value = "None  # edit this!" if expr is None else repr(expr)
-    return f"numbers = {numbers}\ntarget = {target}\nexpr = {expr_value}"
-
-
-def countdown_find_expression(numbers: list[int], target: int) -> str | None:
-    items = [(Fraction(number), str(number)) for number in numbers]
-
-    def search(values: list[tuple[Fraction, str]]) -> str | None:
-        if len(values) == 1:
-            return values[0][1] if values[0][0] == target else None
-        for left_idx in range(len(values)):
-            for right_idx in range(left_idx + 1, len(values)):
-                left_value, left_expr = values[left_idx]
-                right_value, right_expr = values[right_idx]
-                rest = [value for idx, value in enumerate(values) if idx not in (left_idx, right_idx)]
-                candidates = [
-                    (left_value + right_value, f"({left_expr} + {right_expr})"),
-                    (left_value - right_value, f"({left_expr} - {right_expr})"),
-                    (right_value - left_value, f"({right_expr} - {left_expr})"),
-                    (left_value * right_value, f"({left_expr} * {right_expr})"),
-                ]
-                if right_value != 0:
-                    candidates.append((left_value / right_value, f"({left_expr} / {right_expr})"))
-                if left_value != 0:
-                    candidates.append((right_value / left_value, f"({right_expr} / {left_expr})"))
-                for candidate in candidates:
-                    result = search(rest + [candidate])
-                    if result is not None:
-                        return result
-        return None
-
-    return search(items)
-
 
 def countdown_files(text: str) -> dict[str, str] | None:
     try:
@@ -126,38 +67,32 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
 
     def __init__(
         self,
-        dataset_name: str = "Jiayi-Pan/Countdown-Tasks-3to4",
-        split: str = "train",
-        num_examples: int = 15_000,
-        num_eval_examples: int | None = 800,
-        seed: int = 0,
+        dataset_path: str,
+        num_examples: int | None = None,
+        num_eval_examples: int | None = None,
         **_: Any,
     ):
-        # Each raw row (numbers, target) becomes a two-file coding task; the
-        # reference solves the expression with the brute-force searcher, and
-        # the eval split is held out of the same draw.
-        token = os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("HF_TOKEN")
-        total = num_examples + (num_eval_examples or 0)
-        source = load_dataset(dataset_name, split=split, token=token).shuffle(seed=seed).select(range(total))
-        rows = []
-        for example_id, row in enumerate(source):
-            numbers = [int(number) for number in row["nums"]]
-            target = int(row["target"])
-            expr = countdown_find_expression(numbers, target)
-            if expr is None:
-                raise ValueError(f"No countdown expression reaches the target: numbers={numbers}, target={target}")
-            reference = json.dumps(
-                {"solution.py": countdown_solution_py(numbers, target, expr), "test.py": COUNTDOWN_TEST_PY},
-                sort_keys=True,
-            )
-            files_json = json.dumps(
-                {"solution.py": countdown_solution_py(numbers, target, None), "test.py": COUNTDOWN_TEST_PY}
-            )
-            question = COUNTDOWN_PROMPT_TEMPLATE.format(files_json=files_json)
-            rows.append(make_example(example_id, question, reference, info={"numbers": numbers, "target": target}))
+        # Prepared parquet splits with model-written reference solutions; None takes
+        # a full split. The rows are rebuilt so the env's own system prompt applies
+        # instead of the one baked into the data.
+        source = load_dataset("parquet", data_dir=f"{dataset_path}/data")
+
+        def rows(split, limit: int | None) -> list[dict[str, Any]]:
+            selected = split if limit is None else split.select(range(limit))
+            return [
+                make_example(
+                    idx,
+                    row["info"]["question"],
+                    row["answer"],
+                    info={"numbers": row["info"]["numbers"], "target": row["info"]["target"]},
+                )
+                for idx, row in enumerate(selected)
+            ]
+
+        eval_rows = rows(source["validation"], num_eval_examples)
         super().__init__(
-            dataset=Dataset.from_list(rows[:num_examples]),
-            eval_dataset=Dataset.from_list(rows[num_examples:]) if num_eval_examples else None,
+            dataset=Dataset.from_list(rows(source["train"], num_examples)),
+            eval_dataset=Dataset.from_list(eval_rows) if eval_rows else None,
             system_prompt=COUNTDOWN_CODE_SYSTEM_PROMPT,
         )
 

@@ -42,7 +42,6 @@ dependencies = [
     "pybase64>=1.4.2",
     "orjson>=3.10",
     "pandas>=2.0",
-    "rdkit>=2025.3.3",
     "msgspec>=0.18",
     "torchao>=0.17.0",
     "modelexpress==0.3.0",

@@ -3,5 +3,10 @@ output_dir = "outputs/adversarial-test-countdown-code"
 [generator.wandb]
 name = "adversarial-test-countdown-code"
 
+[generator.orchestrator.eval]
+interval = 250
+num_examples = 800
+group_size = 1
+
 [generator.orchestrator.train.env]
-args = { task = "countdown_code", dataset_name = "Jiayi-Pan/Countdown-Tasks-3to4", num_examples = 256, num_eval_examples = 0 }
+args = { task = "countdown_code", dataset_path = "/home/abou/data/datasets/ral_adversarial_hf_ready_20260817/countdown_code_gpt55_train15k_eval800_seed2_20260721" }
