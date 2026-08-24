@@ -82,17 +82,19 @@ class GeneratorEnv(vf.SingleTurnEnv):
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
+    # Candidates are injected verbatim (newlines and all) between explicit tags so the
+    # judge sees the real formatting and multi-line answers cannot bleed into the prompt.
     def adversarial_judge_prompt(self, question: str, candidate: Any) -> str:
         return (
             f"{self.judge_task_label}:\n{question}\n\n"
-            f"{self.judge_candidate_label}:\n{candidate}\n\n"
+            f"{self.judge_candidate_label}:\n<candidate>\n{candidate}\n</candidate>\n\n"
             "Classify the candidate as A (reference answer) or B (model-generated answer)."
         )
 
     def adversarial_pairwise_judge_prompt(self, question: str, candidate_a: Any, candidate_b: Any) -> str:
         return (
             f"{self.judge_task_label}:\n{question}\n\n"
-            f"Candidate A:\n{candidate_a}\n\n"
-            f"Candidate B:\n{candidate_b}\n\n"
+            f"Candidate A:\n<candidate_a>\n{candidate_a}\n</candidate_a>\n\n"
+            f"Candidate B:\n<candidate_b>\n{candidate_b}\n</candidate_b>\n\n"
             "Which candidate is more likely to be the reference answer? Answer A or B."
         )

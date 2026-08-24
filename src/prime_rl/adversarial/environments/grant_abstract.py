@@ -9,7 +9,7 @@ from datasets import Dataset
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
-from prime_rl.adversarial.utils import collapse_whitespace, extract_answer
+from prime_rl.adversarial.utils import extract_answer
 
 WORD_RE = re.compile(r"[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)?")
 
@@ -53,7 +53,7 @@ def build_paper_abstract_dataset(
             abstract = next((str(record[name]) for name in field_names if record.get(name)), None)
             if abstract is None:
                 continue
-            abstract = collapse_whitespace(abstract.strip().strip('"').strip("'"))
+            abstract = abstract.strip()
             key = normalized_text_key(abstract)
             if not key or key in seen:
                 continue
@@ -97,11 +97,8 @@ class PaperAbstractGeneratorEnv(GeneratorEnv):
         )
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
-        answer = extract_answer(completion, require_think=False)
-        if answer is None:
-            return None
-        abstract = collapse_whitespace(answer).strip().strip('"').strip("'")
-        return abstract or None
+        # Raw text: the judge should see the real formatting, newlines included.
+        return extract_answer(completion, require_think=False)
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         reference = self.adversarial_reference_answer(example)
