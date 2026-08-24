@@ -16,14 +16,16 @@ from prime_rl.adversarial.utils import (
     save_rollouts,
 )
 from prime_rl.configs.adversarial import AdversarialRLConfig, AdversarialRoleConfig
+from prime_rl.orchestrator.clients import AdminClients
 from prime_rl.orchestrator.packing import BatchPacker
 from prime_rl.trainer.model import setup_tokenizer
-from prime_rl.transports.rollouts import setup_micro_batch_sender
-from prime_rl.transports.rollouts.types import TrainingSample
-from prime_rl.utils.client import InferencePool, init_nccl_broadcast
+from prime_rl.transports.batch import setup_batch_sender
+from prime_rl.transports.batch.types import TrainingSample
+from prime_rl.transports.weights import setup_weight_receiver
+from prime_rl.transports.weights.base import WeightReceiver
 from prime_rl.utils.config import cli
 from prime_rl.utils.logger import setup_logger
-from prime_rl.utils.pathing import get_broadcast_dir, get_rollout_dir, get_step_path, wait_for_path
+from prime_rl.utils.pathing import get_broadcast_dir, get_rollout_dir, get_step_path
 from prime_rl.utils.process import set_proc_title
 from prime_rl.utils.utils import clean_exit
 
@@ -40,10 +42,10 @@ class RoleRuntime:
     max_retries: int
     tokenizer: Any
     renderer: Any
-    inference_pool: InferencePool
+    admin: AdminClients
+    receiver: WeightReceiver
     model_name: str
     train_client: vf.ClientConfig
-    lora_name: str | None = None
     ckpt_step: int = 0
     train_step: int = 0
 
@@ -110,7 +112,7 @@ def require_config(config: AdversarialRLConfig) -> None:
 
 
 def legacy_train_client(orch) -> vf.ClientConfig:
-    """Rollout client for the legacy verifiers envs. The upstream InferencePool
+    """Rollout client for the legacy verifiers envs. The upstream ``setup_client``
     builds verifiers.v1 client configs, which legacy ``run_rollout`` rejects."""
     client = orch.client
     return vf.ClientConfig(
@@ -119,7 +121,8 @@ def legacy_train_client(orch) -> vf.ClientConfig:
         api_key_var=client.api_key_var,
         max_connections=8192,
         max_keepalive_connections=8192,
-        extra_headers_from_state=client.extra_headers_from_state,
+        # Sticky DP-aware routing at the inference router.
+        extra_headers_from_state={"X-Session-ID": "trajectory_id"},
         renderer_config=orch.renderer,
         renderer_model_name=orch.model.name,
     )
@@ -133,26 +136,18 @@ async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
     tokenizer = setup_tokenizer(orch.tokenizer)
     rollout_model_name = orch.model.name
     renderer = create_renderer(tokenizer, orch.renderer)
-    inference_pool = InferencePool(
-        orch.client,
-        model_name=rollout_model_name,
-        train_client_type="renderer",
-        eval_client_type="openai_chat_completions",
-        renderer_config=orch.renderer,
-    )
+    admin = AdminClients(orch.client)
     logger.info(f"Waiting for {name} inference pool")
-    await inference_pool.wait_for_ready(rollout_model_name)
+    await admin.wait_for_ready(rollout_model_name)
     logger.success(f"{name} inference pool ready")
-    if orch.weight_broadcast.type == "nccl":
-        logger.info(f"Initializing {name} NCCL weight broadcast ({orch.weight_broadcast})")
-        await init_nccl_broadcast(
-            inference_pool.admin_clients,
-            orch.weight_broadcast.host,
-            orch.weight_broadcast.port,
-            orch.weight_broadcast.timeout,
-            inference_world_size=orch.weight_broadcast.inference_world_size,
-            quantize_in_weight_transfer=orch.weight_broadcast.quantize_in_weight_transfer,
-        )
+    logger.info(f"Initializing {name} weight broadcast ({orch.weight_broadcast})")
+    receiver = setup_weight_receiver(
+        get_broadcast_dir(orch.output_dir),
+        orch.weight_broadcast,
+        admin_clients=admin.clients,
+        model_name=rollout_model_name,
+    )
+    await receiver.initialize()
     return RoleRuntime(
         name=name,
         config=config,
@@ -162,10 +157,10 @@ async def setup_role(name: str, config: AdversarialRoleConfig) -> RoleRuntime:
         max_retries=orch.train.max_retries,
         tokenizer=tokenizer,
         renderer=renderer,
-        inference_pool=inference_pool,
         model_name=rollout_model_name,
         train_client=legacy_train_client(orch),
-        lora_name=orch.lora_name,
+        admin=admin,
+        receiver=receiver,
     )
 
 
@@ -421,7 +416,7 @@ async def send_role_batch(runtime: RoleRuntime, rollouts: list[vf.RolloutOutput]
     if not examples:
         raise RuntimeError(f"{runtime.name} produced no trainable examples at step {step}")
     micro_batch_grid = await asyncio.to_thread(BatchPacker(runtime.config.orchestrator).pack, examples)
-    sender = setup_micro_batch_sender(
+    sender = setup_batch_sender(
         runtime.config.orchestrator.output_dir,
         runtime.config.orchestrator.num_train_workers,
         step,
@@ -432,12 +427,8 @@ async def send_role_batch(runtime: RoleRuntime, rollouts: list[vf.RolloutOutput]
 
 
 async def wait_and_update(runtime: RoleRuntime, next_step: int) -> None:
-    weights_path = get_step_path(get_broadcast_dir(runtime.config.orchestrator.output_dir), next_step)
-    await wait_for_path(weights_path / "STABLE", interval=1, log_interval=30)
-    await runtime.inference_pool.update_weights(weights_path, lora_name=runtime.lora_name, step=next_step)
-    if runtime.lora_name is not None:
-        runtime.model_name = runtime.lora_name
-        runtime.inference_pool.update_model_name(runtime.lora_name)
+    await runtime.receiver.wait_published(next_step)
+    await runtime.receiver.receive(next_step)
     runtime.ckpt_step = next_step
     runtime.train_step = next_step
 
@@ -481,8 +472,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
         start_step = config.resume_step or 0
         if start_step:
             logger.info(f"Resuming generator and judge inference from step {start_step}")
-        # The trainers broadcast their startup weights and, in NCCL mode, block on the
-        # NCCL_READY handshake until each role's inference pool joins the receive.
+        # The trainers offer their startup weights and block until each role's
+        # receiver acknowledges and joins the transfer.
         await asyncio.gather(
             wait_and_update(generator, start_step),
             wait_and_update(judge, start_step),
@@ -642,9 +633,9 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
     finally:
         await monitors.finalize()
         if generator is not None:
-            await generator.inference_pool.stop()
+            await generator.admin.aclose()
         if judge is not None:
-            await judge.inference_pool.stop()
+            await judge.admin.aclose()
 
     logger.success("Adversarial orchestrator finished")
 

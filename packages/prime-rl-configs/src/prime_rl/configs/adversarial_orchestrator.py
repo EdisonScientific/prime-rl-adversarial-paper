@@ -82,9 +82,6 @@ class OrchestratorConfig(BaseConfig):
 
     weight_broadcast: WeightBroadcastConfig = FileSystemWeightBroadcastConfig()
 
-    lora_name: str | None = None
-    """Served LoRA adapter name; auto-derived from the trainer's LoRA config."""
-
     rollout_transport: TransportConfig = FileSystemTransportConfig()
 
     output_dir: Path = Path("outputs")
@@ -111,12 +108,6 @@ class OrchestratorConfig(BaseConfig):
             self.tokenizer.name = self.model.name
         if self.tokenizer.trust_remote_code is None:
             self.tokenizer.trust_remote_code = self.model.trust_remote_code
-        return self
-
-    @model_validator(mode="after")
-    def auto_setup_session_headers(self):
-        """Sticky DP-aware routing at the inference router."""
-        self.client.extra_headers_from_state.setdefault("X-Session-ID", "trajectory_id")
         return self
 
     @model_validator(mode="after")

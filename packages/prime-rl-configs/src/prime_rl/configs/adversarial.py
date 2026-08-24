@@ -127,8 +127,6 @@ class AdversarialRoleConfig(BaseConfig):
             return self
         if self.trainer.weight_broadcast.type != "filesystem":
             raise ValueError("LoRA training requires filesystem weight broadcast.")
-        if self.orchestrator.lora_name is None:
-            self.orchestrator.lora_name = f"r{lora.rank}-a{lora.alpha}"
         if self.inference is not None:
             self.inference.vllm.enable_lora = True
             self.inference.vllm.max_lora_rank = lora.rank

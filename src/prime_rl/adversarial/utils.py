@@ -6,7 +6,7 @@ import orjson
 import verifiers as vf
 from verifiers.utils.save_utils import make_serializable
 
-from prime_rl.transports.rollouts.types import TrainingSample
+from prime_rl.transports.batch.types import TrainingSample
 from prime_rl.utils.chat_template import deserialize_tool_calls, normalize_messages
 from prime_rl.utils.logger import get_logger
 
