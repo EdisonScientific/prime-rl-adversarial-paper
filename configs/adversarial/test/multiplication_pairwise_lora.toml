@@ -52,7 +52,7 @@ num_examples = 800
 group_size = 1
 
 [generator.orchestrator.client]
-base_url = "http://localhost:8000/v1"
+base_url = "http://localhost:8002/v1"
 
 [generator.orchestrator.train.sampling]
 temperature = 1.0
@@ -65,7 +65,7 @@ name = "adversarial_generator"
 args = { kind = "generator", task = "multiplication", n_digits = 4, num_examples = 20000, num_eval_examples = 800, seed = 1 }
 
 [generator.inference.server]
-port = 8000
+port = 8002
 
 [generator.inference.vllm]
 max_model_len = 8192
@@ -105,7 +105,7 @@ batch_size = 128
 rollouts_per_example = 1
 
 [judge.orchestrator.client]
-base_url = "http://localhost:8001/v1"
+base_url = "http://localhost:8003/v1"
 
 [judge.orchestrator.train.sampling]
 temperature = 0.0
@@ -118,7 +118,7 @@ name = "adversarial_judge"
 args = { kind = "judge", pairwise = true }
 
 [judge.inference.server]
-port = 8001
+port = 8003
 
 [judge.inference.vllm]
 max_model_len = 2048
