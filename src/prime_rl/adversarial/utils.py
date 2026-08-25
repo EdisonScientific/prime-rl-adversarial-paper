@@ -64,8 +64,9 @@ def extract_answer(completion: Any) -> str | None:
     match = ANSWER_RE.fullmatch(rest)
     if match is None:
         return None
-    answer = match.group(1).strip()
-    if not answer or re.search(r"</?answer\b", answer, re.IGNORECASE):
+    answer = match.group(1)
+    # answer = answer.strip()
+    if not answer.strip() or re.search(r"</?answer\b", answer, re.IGNORECASE):
         return None
     return answer
 
