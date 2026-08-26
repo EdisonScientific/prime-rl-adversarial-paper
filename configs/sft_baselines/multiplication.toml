@@ -25,7 +25,6 @@ project = "sft-baselines"
 name = "multiplication-qwen3-0.6b"
 
 [eval]
-eval_on_start = true
 interval = 50
 num_examples = 800
 
