@@ -9,6 +9,7 @@ num_infer_gpus = 1
 
 [model]
 name = "Qwen/Qwen3-0.6B"
+attn = "flash_attention_2"
 
 [data]
 name = "EdisonScientific/multiplication-sft"
