@@ -1,0 +1,41 @@
+max_steps = 400
+output_dir = "outputs/sft-baseline-multiplication"
+
+[deployment]
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[ckpt]
+
+[model]
+name = "Qwen/Qwen3-0.6B"
+
+[data]
+name = "EdisonScientific/multiplication-sft"
+seq_len = 2048
+batch_size = 64
+micro_batch_size = 8
+
+[optim]
+lr = 2e-5
+
+[monitors.wandb]
+project = "testing-adversarial"
+name = "sft-baseline-multiplication"
+
+[eval]
+interval = 50
+num_examples = 800
+
+[eval.sampling]
+temperature = 1.0
+max_completion_tokens = 4096
+
+[[eval.source]]
+name = "multiplication"
+env.taskset.id = "multiplication"
+env.taskset.split = "validation"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[inference]
