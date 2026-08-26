@@ -81,7 +81,7 @@ A condensed view of the knobs you'll most often tune. For trainer-side paralleli
 | `--run.name <name>` | Run name, also the run directory name under `<output_dir>` (override the directory separately via `--run.dir`). Auto-generated as `<envs>--<model>--<short-id>` when unset, so every launch gets a fresh, readable run directory. Set an explicit name for a predictable path — required to resume the run later. |
 | `--clean` | Wipe the run directory before starting. Useful when re-running a named run during iteration. |
 | `--max-steps N` | Stop after `N` trainer steps. Overrides the config value. |
-| `--dry-run` | Resolve + validate the full config, write per-process configs to `<run_dir>/configs/resolved/`, and exit without launching. The fastest way to debug a misbehaving config. |
+| `--dry-run` | Resolve + validate the full config, write per-process configs to `<run_dir>/configs/latest/resolved/`, and exit without launching. The fastest way to debug a misbehaving config. |
 
 ### Algorithms
 
@@ -198,7 +198,7 @@ num_train_gpus = 1  # trainer
 num_infer_gpus = 1  # inference
 ```
 
-The launcher starts the inference server, one env server per eval source, and an `evals` process next to the trainer. NCCL is the default weight transport. The trainer broadcasts weights at startup (fail-fast) and at every step an eval env is due, Every broadcast runs the same four-stage handshake in `broadcasts/step_{n}`: the trainer offers the version (`.sender_ready`) and blocks, the evals process acknowledges (`.receiver_ready`), then the trainer transfers (`.started`) and commits (`.finished`). It runs the due envs sequentially per broadcast, so every epoch measures exactly one policy version. Set `[weight_broadcast] type = "filesystem"` to reload weights from disk instead. LoRA and externally managed inference use filesystem broadcast automatically. The base model is evaluated before the first step (disable with `eval.skip_first_step`), and the final broadcast always fires every env. In-flight eval episodes are sized by the same adaptive concurrency controller as the orchestrator; bound it with `[eval.concurrency]` (`min_inflight` / `max_inflight`; set them equal for fixed concurrency).
+The launcher starts the inference server, one env server per eval source, and an `evals` process next to the trainer. NCCL is the default weight transport. The trainer broadcasts weights at startup (fail-fast) and at every step an eval env is due, Every broadcast runs the same four-stage handshake in `broadcasts/step_{n}`: the trainer offers the version (`.sender_ready`) and blocks, the evals process acknowledges (`.receiver_ready`), then the trainer transfers (`.started`) and commits (`.finished`). It runs the due envs sequentially per broadcast, so every epoch measures exactly one policy version. Set `[weight_broadcast] type = "filesystem"` to reload weights from disk instead. LoRA and externally managed inference use filesystem broadcast automatically. The base model is evaluated before the first step (disable with `eval.skip_first_step`), and the final broadcast always fires every env. In-flight eval episodes are cancelled by default when the next checkpoint is ready, so stale evals do not delay a weight update. Set `eval.cancel_on_new_checkpoint = false` to drain every triggered epoch instead. The trainer can idle while it waits for slow evals. They are sized by the same adaptive concurrency controller as the orchestrator; bound it with `[eval.concurrency]` (`min_inflight` / `max_inflight`; set them equal for fixed concurrency).
 
 #### Multi-Node Trainer and Inference Pool
 
@@ -312,6 +312,13 @@ uv run torchrun --nproc-per-node 8 tools/convert_dcp_to_bf16.py outputs/my-run/c
 The exported directory loads directly into `uv run inference --vllm.model <dir>` or any HF consumer. Quantize it to blockwise FP8 (DeepSeek/GLM format, loads natively in vLLM) with `tools/convert_bf16_to_fp8.py <dir>`, or go straight from the checkpoint with `tools/convert_dcp_to_fp8.py <ckpt_dir>` (each rank quantizes its gathered slice, writes only `<ckpt_dir>/weights-FP8` — no intermediate bf16 export); dequantize an fp8-only release (e.g. GLM-5-FP8) for training with `tools/convert_fp8_to_bf16.py <dir>`.
 
 ## Observability
+
+### Config Files
+
+Each launch writes its command, input TOML, and resolved JSON files to
+`<run_dir>/configs/attempt_<n>/`. Resumed runs keep the earlier configs.
+`command.txt` uses shell-safe quoting.
+`configs/latest` points to the current attempt.
 
 ### Log Files
 

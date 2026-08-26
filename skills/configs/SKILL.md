@@ -25,8 +25,12 @@ Naming: CLI uses kebab-case (`--vllm.max-model-len`); TOML uses snake_case (`max
 
 ```bash
 uv run rl --help                                  # all fields and defaults
-uv run rl @ rl.toml --dry-run --output-dir /tmp/x --run.name check # write resolved configs (JSON) to /tmp/x/check/configs
+uv run rl @ rl.toml --dry-run --output-dir /tmp/x --run.name check # write resolved JSON to /tmp/x/check/configs/latest
 ```
+
+Each attempt also writes `configs/attempt_<n>/command.txt`. It records the
+shell-safe launch command, including CLI overrides. `configs/latest` points to
+the current attempt.
 
 ## Validators
 

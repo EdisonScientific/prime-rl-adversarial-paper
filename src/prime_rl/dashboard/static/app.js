@@ -31,7 +31,10 @@ const state = {
     paneOrder: prefs.paneOrder ?? {},
   },
   compare: { runs: [], data: new Map() },
-  config: { loaded: false, files: [], file: null, fmt: "toml", cache: new Map() },
+  config: {
+    loaded: false, attempt: "latest", latestAttempt: null, attempts: [],
+    files: [], file: null, fmt: "toml", commandText: "", cache: new Map(),
+  },
   logs: {
     loaded: false, attempt: "latest", attempts: [], files: [], paneFile: {},
     components: prefs.logComponents ? new Set(prefs.logComponents) : null,
@@ -188,8 +191,14 @@ async function selectRun(name, deferTab = false) {
     evalEtag: null, evalCount: 0, evalCost: null,
   };
   if (state.meta?.type === "eval") fetchEvalSeries(); // populates the overview cost early
-  state.config = { loaded: false, files: [], file: null, fmt: state.config.fmt, cache: new Map() };
-  state.logs = { ...state.logs, loaded: false, attempt: "latest", files: [], paneFile: {}, maximized: null, buffers: new Map() };
+  state.config = {
+    loaded: false, attempt: "latest", latestAttempt: null, attempts: [],
+    files: [], file: null, fmt: state.config.fmt, commandText: "", cache: new Map(),
+  };
+  state.logs = {
+    ...state.logs, loaded: false, attempt: "latest", latestAttempt: null,
+    files: [], paneFile: {}, maximized: null, buffers: new Map(),
+  };
   state.traces = {
     ...state.traces,
     loaded: false, fetching: false, steps: [], step: null, env: "", episodes: [], etag: null,
@@ -567,6 +576,7 @@ function buildSections(meta) {
       { regex: `eval/${envPattern}/effective/[^/]+/avg@.*` },
       { regex: `eval/${envPattern}/effective/[^/]+/reward/mean`, split: true },
       { regex: `eval/${envPattern}/all/[^/]+/reward/mean`, split: true },
+      { regex: `eval/${envPattern}/all/cancelled/mean` },
       ...COMMON_METRICS.map((m) => ({ regex: `eval/${envPattern}/${m}` })),
       ...COMMON_REGEXES.map((r) => ({ regex: `eval/${envPattern}/${r}` })),
     ],
@@ -1217,19 +1227,23 @@ async function initMetrics() {
 /* ----------------------------------------------------------------- config */
 
 
-/* both views are fetched once per run, so the TOML/JSON toggle never waits on
-   the network */
+/* config artifacts are fetched once per attempt, so format changes never wait
+   on the network */
 async function fetchConfigText(file) {
   const cache = state.config.cache;
-  if (cache.has(file)) return cache.get(file);
-  const data = await api(`/api/runs/${encodeURIComponent(state.run)}/config?file=${encodeURIComponent(file)}`);
+  const key = `${state.config.attempt}:${file}`;
+  if (cache.has(key)) return cache.get(key);
+  const data = await api(
+    `/api/runs/${encodeURIComponent(state.run)}/config?file=${encodeURIComponent(file)}` +
+    `&attempt=${encodeURIComponent(state.config.attempt)}`
+  );
   let text = data.content;
   try {
     text = JSON.stringify(JSON.parse(text), null, 2);
   } catch {
     /* show raw content if not valid JSON */
   }
-  cache.set(file, text);
+  cache.set(key, text);
   return text;
 }
 
@@ -1344,6 +1358,10 @@ function applyConfigSearch() {
   } catch {
     re = new RegExp(escRe(query), "gi");
   }
+  const test = (line) => {
+    re.lastIndex = 0;
+    return re.test(line);
+  };
   const noHits = () => {
     view.innerHTML = emptyState("no hits", "nothing in this config matches the filter");
     hitsEl.textContent = "no hits";
@@ -1356,10 +1374,6 @@ function applyConfigSearch() {
     // TOML (launch config): a matching line keeps itself (plus its [section]
     // header for context); a matching [section] header keeps the whole section
     const lines = (state.config.text ?? "").split("\n");
-    const test = (line) => {
-      re.lastIndex = 0;
-      return re.test(line);
-    };
     const kept = [];
     let header = null;
     let headerKept = false;
@@ -1418,10 +1432,12 @@ function applyConfigSearch() {
   view.querySelector("mark.hit")?.scrollIntoView({ block: "center" });
 }
 
-/* TOML = the launch config as it was passed, JSON = the concatenated resolved dumps */
+/* TOML = launch config, JSON = resolved dumps */
 function configFileFor(fmt) {
   const files = state.config.files || [];
-  return fmt === "toml" ? files.find((f) => f.endsWith(".toml")) : files.find((f) => f === "resolved");
+  if (fmt === "toml") return files.find((f) => f.endsWith(".toml"));
+  if (fmt === "json") return files.find((f) => f === "resolved");
+  return files.find((f) => f === "command.txt");
 }
 
 function renderConfigFormat() {
@@ -1431,21 +1447,55 @@ function renderConfigFormat() {
   }
 }
 
-async function initConfig() {
-  state.config.loaded = true;
-  const data = await api(`/api/runs/${encodeURIComponent(state.run)}/configs`);
+function renderConfigAttempts() {
+  const config = state.config;
+  const latest = config.latestAttempt == null ? "latest" : `latest (attempt ${config.latestAttempt})`;
+  $("#config-attempt-select").innerHTML =
+    `<option value="latest" ${config.attempt === "latest" ? "selected" : ""}>${latest}</option>` +
+    config.attempts
+      .map((a) => `<option value="${a}" ${String(a) === String(config.attempt) ? "selected" : ""}>attempt ${a}</option>`)
+      .join("");
+  syncDressedSelects();
+}
+
+function renderConfigCommand() {
+  const command = state.config.commandText.trimEnd();
+  $("#config-command").classList.toggle("empty", !command);
+  $("#config-command-text").textContent = command || "command unavailable for this attempt";
+  $("#config-command-copy").disabled = !command;
+}
+
+async function loadConfigAttempt() {
+  const data = await api(
+    `/api/runs/${encodeURIComponent(state.run)}/configs?attempt=${encodeURIComponent(state.config.attempt)}`
+  );
+  state.config.latestAttempt = state.config.attempt === "latest" ? data.attempt : state.config.latestAttempt;
+  state.config.attempts = data.attempts;
   state.config.files = data.files;
-  if (!data.files.length) {
+  renderConfigAttempts();
+  const commandFile = configFileFor("command");
+  state.config.commandText = commandFile ? await fetchConfigText(commandFile) : "";
+  renderConfigCommand();
+  if (!configFileFor("toml") && !configFileFor("json")) {
     renderConfigFormat();
-    $("#config-view").innerHTML = emptyState("no configs", "this run has no configs/ directory");
+    $("#config-view").innerHTML = emptyState("no configs", "this attempt has no config files");
     return;
   }
-  if (!configFileFor(state.config.fmt)) state.config.fmt = configFileFor("toml") ? "toml" : "json";
+  if (!configFileFor(state.config.fmt)) {
+    state.config.fmt = ["toml", "json"].find((fmt) => configFileFor(fmt));
+  }
   state.config.file = configFileFor(state.config.fmt);
   renderConfigFormat();
   await loadConfig();
-  const other = configFileFor(state.config.fmt === "toml" ? "json" : "toml");
-  if (other) fetchConfigText(other); // warm the other side of the toggle
+  for (const fmt of ["toml", "json"]) {
+    const file = configFileFor(fmt);
+    if (file && file !== state.config.file) fetchConfigText(file);
+  }
+}
+
+async function initConfig() {
+  state.config.loaded = true;
+  await loadConfigAttempt();
 }
 
 /* ------------------------------------------------------------------- logs */
@@ -1578,9 +1628,12 @@ function dressLogPaneSelects() {
 
 function renderLogPanes() {
   const logs = state.logs;
-  $("#attempt-select").innerHTML = logs.attempts
-    .map((a) => `<option value="${a}" ${String(a) === String(logs.attempt) ? "selected" : ""}>attempt ${a}</option>`)
-    .join("");
+  const latest = logs.latestAttempt == null ? "latest" : `latest (attempt ${logs.latestAttempt})`;
+  $("#attempt-select").innerHTML =
+    `<option value="latest" ${logs.attempt === "latest" ? "selected" : ""}>${latest}</option>` +
+    logs.attempts
+      .map((a) => `<option value="${a}" ${String(a) === String(logs.attempt) ? "selected" : ""}>attempt ${a}</option>`)
+      .join("");
   renderLogCompMenu();
   const container = $("#log-panes");
   container.innerHTML = "";
@@ -1755,7 +1808,7 @@ async function loadLogfiles() {
   const logs = state.logs;
   const data = await api(`/api/runs/${encodeURIComponent(state.run)}/logfiles?attempt=${logs.attempt}`);
   logs.attempts = data.attempts;
-  logs.attempt = data.attempt;
+  if (logs.attempt === "latest") logs.latestAttempt = data.attempt;
   logs.files = data.files;
   renderLogPanes();
   dressLogPaneSelects();
@@ -3532,6 +3585,10 @@ $("#config-format").addEventListener("click", (e) => {
   renderConfigFormat();
   loadConfig();
 });
+$("#config-command-copy").addEventListener("click", (e) => {
+  const command = state.config.commandText.trimEnd();
+  if (command) copyText(command, e.currentTarget);
+});
 $("#config-search").addEventListener(
   "input",
   debounce(() => {
@@ -3634,6 +3691,11 @@ $("#attempt-select").addEventListener("change", async (e) => {
   state.logs.paneFile = {};
   await loadLogfiles();
   await pollLogs();
+});
+$("#config-attempt-select").addEventListener("change", async (e) => {
+  state.config.attempt = e.target.value;
+  state.config.file = null;
+  await loadConfigAttempt();
 });
 $("#log-panes").addEventListener("change", async (e) => {
   const select = e.target.closest(".lp-file");
@@ -4084,7 +4146,7 @@ document.addEventListener("visibilitychange", () => {
   $("#config-search").value = prefs.configSearch ?? "";
   $("#token-signal").value = prefs.tokenSignal === "rendered" ? "" : (prefs.tokenSignal ?? "");
   $("#follow-toggle").checked = state.follow;
-  for (const sel of ["#run-select", "#trace-env", "#trace-sort", "#tm-env", "#tm-sort", "#attempt-select", "#token-signal", "#report-select"])
+  for (const sel of ["#run-select", "#trace-env", "#trace-sort", "#tm-env", "#tm-sort", "#config-attempt-select", "#attempt-select", "#token-signal", "#report-select"])
     dressSelect($(sel));
   syncTraceFilterControls();
   setActive("#metrics-mode", "mode", state.metrics.mode);
