@@ -28,6 +28,9 @@ name = "multiplication-qwen3-0.6b"
 interval = 50
 num_examples = 800
 
+[eval.concurrency]
+initial_inflight = 800
+
 [eval.sampling]
 temperature = 1.0
 max_completion_tokens = 4096
