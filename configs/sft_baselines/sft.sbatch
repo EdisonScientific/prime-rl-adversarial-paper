@@ -14,7 +14,9 @@ set -euo pipefail
 CONFIG_NAME="$1"
 
 cd "${SLURM_SUBMIT_DIR}"
+set -a
 [ -f .env ] && source .env
+set +a
 export TORCH_BLAS_PREFER_CUBLASLT=1
 export VLLM_ENGINE_READY_TIMEOUT_S=1200
 export HF_HOME="${HF_HOME:-$HOME/data/cache/huggingface}"
