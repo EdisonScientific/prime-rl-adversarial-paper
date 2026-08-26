@@ -20,8 +20,8 @@ micro_batch_size = 8
 lr = 2e-5
 
 [monitors.wandb]
-project = "testing-adversarial"
-name = "sft-baseline-multiplication"
+project = "sft-baselines"
+name = "multiplication-qwen3-0.6b"
 
 [eval]
 interval = 50
