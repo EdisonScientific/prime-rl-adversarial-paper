@@ -41,7 +41,7 @@ from prime_rl.configs.trainer import (
     TokenizerConfig,
     TrainerConfig,
 )
-from prime_rl.utils.config import BaseConfig, find_package_resource
+from prime_rl.utils.config import BaseConfig, default_output_dir, find_package_resource
 from prime_rl.utils.validation import (
     propagate_shared_fields,
     validate_shared_ckpt_config,
@@ -243,8 +243,8 @@ class RLConfig(BaseConfig):
     run: RunConfig = Field(default_factory=RunConfig)
     """Run metadata. ``run.name`` names the run directory under ``output_dir``."""
 
-    output_dir: Path = Path("outputs")
-    """Directory that groups related runs. Each run writes its artifacts to ``output_dir / run.name``."""
+    output_dir: Path = Field(default_factory=default_output_dir)
+    """Directory that groups related runs. Each run writes its artifacts to ``output_dir / run.name``. Defaults to ``$PRL_OUTPUT_DIR`` if set, else ``outputs``."""
 
     clean: bool = False
     """Delete the run directory (``output_dir / run.name``) before starting training. Required to overwrite a run directory that contains artifacts from a previous run when not resuming."""
@@ -298,6 +298,10 @@ class RLConfig(BaseConfig):
 
     slurm: SlurmConfig | None = None
     """SLURM configuration. If None, runs locally."""
+
+    dashboard: bool = True
+    """Make sure a local dashboard daemon serves this run's output dir (started on
+    demand in interactive sessions; an already-running daemon's URL is logged)."""
 
     dry_run: bool = False
     """Only validate and dump resolved configs, then exit early."""
@@ -467,9 +471,6 @@ class RLConfig(BaseConfig):
                 "PEFT-shaped directory on disk (LoRAModel.from_local_checkpoint) - in-memory transports "
                 "have no disk artifact to load from."
             )
-        # The final version v{max_steps} is broadcast iff something consumes it:
-        # training never samples from it, but a configured final eval measures it.
-        broadcast_final = self.orchestrator.eval is not None
         if self.weight_broadcast.type in ("nccl", "nixl"):
             inference_world_size = (
                 self.inference.vllm.data_parallel_size * self.inference.vllm.tensor_parallel_size
@@ -481,7 +482,6 @@ class RLConfig(BaseConfig):
                 port=self.weight_broadcast.port,
                 timeout=self.weight_broadcast.timeout,
                 inference_world_size=inference_world_size,
-                broadcast_final=broadcast_final,
             )
             if self.weight_broadcast.type == "nccl":
                 transport_config = dict(
@@ -497,10 +497,10 @@ class RLConfig(BaseConfig):
             self.orchestrator.weight_broadcast = orchestrator_config_type(**common_config, **transport_config)
         elif self.weight_broadcast.type == "filesystem":
             self.trainer.weight_broadcast = TrainerFileSystemWeightBroadcastConfig(
-                timeout=self.weight_broadcast.timeout, broadcast_final=broadcast_final
+                timeout=self.weight_broadcast.timeout
             )
             self.orchestrator.weight_broadcast = OrchestratorFileSystemWeightBroadcastConfig(
-                timeout=self.weight_broadcast.timeout, broadcast_final=broadcast_final
+                timeout=self.weight_broadcast.timeout
             )
         if self.inference is not None:
             self.inference.weight_broadcast = InferenceWeightBroadcastConfig(type=self.weight_broadcast.type)

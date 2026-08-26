@@ -10,7 +10,7 @@ from verifiers.utils.save_utils import make_serializable
 from prime_rl.transports.batch.types import TrainingSample
 from prime_rl.utils.chat_template import deserialize_tool_calls, normalize_messages
 from prime_rl.utils.logger import get_logger
-from prime_rl.utils.utils import get_all_ckpt_steps, get_ckpt_dir
+from prime_rl.utils.pathing import get_all_ckpt_steps, get_ckpt_dir
 
 ANSWER_RE = re.compile(r"\s*<answer>(.*?)</answer>\s*\Z", re.DOTALL | re.IGNORECASE)
 
