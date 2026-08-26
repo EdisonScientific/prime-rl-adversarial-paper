@@ -74,6 +74,16 @@ class AdversarialRoleConfig(BaseConfig):
         return self
 
     @model_validator(mode="after")
+    def resolve_train_workers(self):
+        if self.deployment.type == "single_node":
+            self.orchestrator.num_train_workers = self.deployment.num_train_gpus // self.trainer.model.cp
+        else:
+            self.orchestrator.num_train_workers = (
+                self.deployment.num_train_nodes * self.deployment.gpus_per_node // self.trainer.model.cp
+            )
+        return self
+
+    @model_validator(mode="after")
     def resolve_lora(self):
         lora = self.trainer.model.lora
         if lora is None:
