@@ -52,7 +52,6 @@ members = [
     "charxiv",
     "clbench",
     "color-codeword",
-    "countdown",
     "deep-swe",
     "deepdive",
     "deepseek-prover",
@@ -64,7 +63,6 @@ members = [
     "general-agent",
     "goedel-pset",
     "gpqa",
-    "grant-abstracts",
     "graphwalks",
     "gsm8k",
     "hle",
@@ -92,7 +90,6 @@ members = [
     "mmmu",
     "mmmu-pro",
     "mrcr-v2",
-    "multiplication",
     "multiswe",
     "nl2repobench",
     "numina",
@@ -117,9 +114,9 @@ members = [
     "scaleswe",
     "scicode",
     "senior-swe-bench",
+    "sft-eval-tasksets",
     "simpleqa",
     "simpleqa-verified",
-    "smiles2formula",
     "swebench-multilingual",
     "swebench-pro",
     "swebench-verified",
@@ -1061,17 +1058,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/05/0a/a3fe3be3ee2dceb3e615ebb4df97ae6f3828aa915d3e10549ce016302bd1/contourpy-1.3.3-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:451e71b5a7d597379ef572de31eeb909a87246974d960049a9848c3bc6c41bf7", size = 1331288, upload-time = "2025-07-26T12:01:31.198Z" },
     { url = "https://files.pythonhosted.org/packages/33/1d/acad9bd4e97f13f3e2b18a3977fe1b4a37ecf3d38d815333980c6c72e963/contourpy-1.3.3-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:459c1f020cd59fcfe6650180678a9993932d80d44ccde1fa1868977438f0b411", size = 1403386, upload-time = "2025-07-26T12:01:33.947Z" },
 ]
-
-[[package]]
-name = "countdown"
-version = "0.1.0"
-source = { editable = "environments/countdown" }
-dependencies = [
-    { name = "datasets" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "datasets" }]
 
 [[package]]
 name = "cryptography"
@@ -2176,17 +2162,6 @@ requires-dist = [
     { name = "openai" },
     { name = "verifiers", specifier = ">=0.2.0" },
 ]
-
-[[package]]
-name = "grant-abstracts"
-version = "0.1.0"
-source = { editable = "environments/grant_abstracts" }
-dependencies = [
-    { name = "datasets" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "datasets" }]
 
 [[package]]
 name = "graphwalks"
@@ -3840,17 +3815,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2b/17/ebb9644da78c4ab36403739e0e6e0e30ebb135b9caf3440825001a0bddcb/multidict-6.7.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:fc5907494fccf3e7d3f94f95c91d6336b092b5fc83811720fae5e2765890dfba", size = 251377, upload-time = "2026-01-26T02:44:12.042Z" },
     { url = "https://files.pythonhosted.org/packages/81/08/7036c080d7117f28a4af526d794aab6a84463126db031b007717c1a6676e/multidict-6.7.1-py3-none-any.whl", hash = "sha256:55d97cc6dae627efa6a6e548885712d4864b81110ac76fa4e534c03819fa4a56", size = 12319, upload-time = "2026-01-26T02:46:44.004Z" },
 ]
-
-[[package]]
-name = "multiplication"
-version = "0.1.0"
-source = { editable = "environments/multiplication" }
-dependencies = [
-    { name = "datasets" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "datasets" }]
 
 [[package]]
 name = "multiprocess"
@@ -6429,6 +6393,17 @@ wheels = [
 ]
 
 [[package]]
+name = "sft-eval-tasksets"
+version = "0.1.0"
+source = { editable = "environments/tasksets" }
+dependencies = [
+    { name = "datasets" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "datasets" }]
+
+[[package]]
 name = "shellingham"
 version = "1.5.4"
 source = { registry = "https://pypi.org/simple" }
@@ -6500,17 +6475,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/c5/65/3ada667d326753990
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/78/0f68b93564b8c6b6987a0696c582ba2591a381ab2f733a501909e949f241/smart_open-7.6.1-py3-none-any.whl", hash = "sha256:b4de6aebef023aca91cc9fb372052e1343ba3f152de215bd22391a663e3ddd21", size = 64845, upload-time = "2026-05-09T06:23:35.386Z" },
 ]
-
-[[package]]
-name = "smiles2formula"
-version = "0.1.0"
-source = { editable = "environments/smiles2formula" }
-dependencies = [
-    { name = "datasets" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "datasets" }]
 
 [[package]]
 name = "smmap"
