@@ -1,4 +1,4 @@
-max_steps = 400
+max_steps = 20000
 output_dir = "outputs/sft-baseline-multiplication"
 
 [deployment]
@@ -6,6 +6,8 @@ num_train_gpus = 1
 num_infer_gpus = 1
 
 [ckpt]
+interval = 1000
+keep_last = 2
 
 [model]
 name = "Qwen/Qwen3-0.6B"
@@ -25,10 +27,10 @@ lr = 2e-5
 
 [monitors.wandb]
 project = "sft-baselines"
-name = "multiplication-qwen3-0.6b-20k-b256"
+name = "multiplication-qwen3-0.6b-20ksteps"
 
 [eval]
-interval = 25
+interval = 250
 num_examples = 800
 
 [eval.concurrency]
