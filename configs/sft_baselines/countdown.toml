@@ -26,7 +26,12 @@ lr = 3e-5
 project = "sft-baselines"
 name = "countdown-qwen3-1.7b"
 
+[weight_broadcast]
+type = "nccl"
+port = 29601
+
 [eval]
+env_server_base_port = 5100
 interval = 60
 num_examples = 800
 
@@ -55,3 +60,6 @@ env.agent.harness.id = "null"
 env.agent.runtime.type = "subprocess"
 
 [inference]
+
+[inference.server]
+port = 8020
