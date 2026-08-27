@@ -29,12 +29,13 @@ interval = 78
 num_examples = 800
 
 [eval.concurrency]
-initial_inflight = 1600
-max_inflight = 1600
+initial_inflight = 1056
+max_inflight = 1056
 
 [eval.sampling]
 temperature = 1.0
 max_completion_tokens = 4096
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
 
 [[eval.source]]
 name = "multiplication"
@@ -45,6 +46,7 @@ env.agent.runtime.type = "subprocess"
 
 [[eval.source]]
 name = "multiplication-train"
+num_examples = 256
 env.taskset.id = "multiplication"
 env.taskset.split = "train"
 env.agent.harness.id = "null"
