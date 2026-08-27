@@ -262,7 +262,7 @@ def train(config: SFTConfig):
     cp_size = parallel_dims.cp
 
     accuracy_ignore_ids: torch.Tensor | None = None
-    ignore_strings = getattr(config.data, "accuracy_ignore_strings", [])
+    ignore_strings = config.data.accuracy_ignore_strings
     if ignore_strings:
         ignore_ids = sorted(
             {token_id for text in ignore_strings for token_id in tokenizer.encode(text, add_special_tokens=False)}

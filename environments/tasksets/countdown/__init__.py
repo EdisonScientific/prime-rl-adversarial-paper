@@ -1,17 +1,14 @@
-"""countdown: two-file Countdown coding tasks scored like the adversarial RL env.
-
-A completion is a JSON object with solution.py and test.py after an optional
-reasoning block. The reward runs the submitted solution against the canonical
-test file, so a modified test.py cannot game it.
-"""
+"""countdown: two-file Countdown coding tasks. A completion is a JSON object
+with solution.py and test.py after an optional reasoning block; the reward runs
+the submitted solution against the canonical test file, so a modified test.py
+cannot game it."""
 
 import asyncio
 import json
 import sys
-from typing import Literal
 
 import verifiers.v1 as vf
-from datasets import load_dataset
+from taskset_common import AnswerData, CanonicalConfig, load_tasks
 
 COUNTDOWN_TEST_PY = """\
 def verify_solution(numbers, target, expr) -> bool:
@@ -72,11 +69,7 @@ async def canonical_test_passes(solution: str) -> bool:
     return process.returncode == 0 and stdout.decode().strip() == "True"
 
 
-class CountdownData(vf.TaskData):
-    pass
-
-
-class CountdownTask(vf.Task[CountdownData]):
+class CountdownTask(vf.Task[AnswerData]):
     @vf.reward(weight=1.0)
     async def correct(self, trace: vf.Trace, runtime: vf.Runtime) -> float:
         reply = trace.last_reply or ""
@@ -86,18 +79,13 @@ class CountdownTask(vf.Task[CountdownData]):
         return float(await canonical_test_passes(files["solution.py"].strip()))
 
 
-class CountdownConfig(vf.TasksetConfig):
+class CountdownConfig(CanonicalConfig):
     dataset: str = "EdisonScientific/countdown"
-    split: Literal["train", "validation"] = "validation"
 
 
 class CountdownTaskset(vf.Taskset[CountdownTask, CountdownConfig]):
     def load(self) -> list[CountdownTask]:
-        rows = load_dataset(self.config.dataset, split=self.config.split)
-        return [
-            CountdownTask(
-                CountdownData(idx=i, prompt=row["info"]["question"]),
-                self.config.task,
-            )
-            for i, row in enumerate(rows)
-        ]
+        return load_tasks(self, CountdownTask)
+
+
+__all__ = ["CountdownTaskset"]
