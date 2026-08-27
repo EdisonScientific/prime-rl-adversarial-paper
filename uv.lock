@@ -118,6 +118,7 @@ members = [
     "senior-swe-bench",
     "simpleqa",
     "simpleqa-verified",
+    "smiles2formula",
     "swebench-multilingual",
     "swebench-pro",
     "swebench-verified",
@@ -6487,6 +6488,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/c5/65/3ada667d326753990
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/78/0f68b93564b8c6b6987a0696c582ba2591a381ab2f733a501909e949f241/smart_open-7.6.1-py3-none-any.whl", hash = "sha256:b4de6aebef023aca91cc9fb372052e1343ba3f152de215bd22391a663e3ddd21", size = 64845, upload-time = "2026-05-09T06:23:35.386Z" },
 ]
+
+[[package]]
+name = "smiles2formula"
+version = "0.1.0"
+source = { editable = "environments/smiles2formula" }
+dependencies = [
+    { name = "datasets" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "datasets" }]
 
 [[package]]
 name = "smmap"
