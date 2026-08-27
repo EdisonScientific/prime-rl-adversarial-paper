@@ -1,0 +1,55 @@
+max_steps = 600
+output_dir = "outputs/sft-baseline-countdown"
+
+[deployment]
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[ckpt]
+
+[model]
+name = "Qwen/Qwen3-0.6B"
+attn = "flash_attention_2"
+
+[data]
+name = "EdisonScientific/countdown-sft"
+seq_len = 4096
+batch_size = 128
+micro_batch_size = 8
+
+[optim]
+lr = 3e-5
+
+[monitors.wandb]
+project = "sft-baselines"
+name = "countdown-qwen3-0.6b"
+
+[eval]
+interval = 60
+num_examples = 800
+
+[eval.concurrency]
+initial_inflight = 1056
+max_inflight = 1056
+
+[eval.sampling]
+temperature = 1.0
+max_completion_tokens = 4096
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[[eval.source]]
+name = "countdown"
+env.taskset.id = "countdown"
+env.taskset.split = "validation"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[[eval.source]]
+name = "countdown-train"
+num_examples = 256
+env.taskset.id = "countdown"
+env.taskset.split = "train"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[inference]

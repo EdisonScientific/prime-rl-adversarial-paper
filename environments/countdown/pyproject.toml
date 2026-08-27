@@ -1,0 +1,13 @@
+[project]
+name = "countdown"
+version = "0.1.0"
+description = "countdown - two-file Countdown coding task verified against the canonical test."
+requires-python = ">=3.11"
+dependencies = ["datasets"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["countdown"]
