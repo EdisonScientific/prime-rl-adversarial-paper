@@ -18,7 +18,7 @@ fused_lm_head_token_chunk_size = "disabled"
 [data]
 name = "EdisonScientific/grant-abstracts-NIH-fy2026-sft"
 seq_len = 2048
-batch_size = 64
+batch_size = 72
 micro_batch_size = 2
 accuracy_ignore_strings = ["<answer>", "</answer>"]
 
