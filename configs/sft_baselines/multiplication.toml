@@ -25,7 +25,7 @@ project = "sft-baselines"
 name = "multiplication-qwen3-0.6b"
 
 [eval]
-interval = 50
+interval = 78
 num_examples = 800
 
 [eval.concurrency]
