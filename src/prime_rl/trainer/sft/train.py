@@ -261,13 +261,15 @@ def train(config: SFTConfig):
     dp_cp_group = parallel_dims.get_mesh("dp_cp").get_group()
     cp_size = parallel_dims.cp
 
-    accuracy_ignore_ids: torch.Tensor | None = None
-    ignore_strings = config.data.accuracy_ignore_strings
-    if ignore_strings:
-        ignore_ids = sorted(
-            {token_id for text in ignore_strings for token_id in tokenizer.encode(text, add_special_tokens=False)}
-        )
-        accuracy_ignore_ids = torch.tensor(ignore_ids, device="cuda")
+    # Accuracy metrics grade only supervised tokens outside accuracy_ignore_strings (e.g. answer tags).
+    ungraded_token_ids: torch.Tensor | None = None
+    if config.data.accuracy_ignore_strings:
+        ids = {
+            token_id
+            for text in config.data.accuracy_ignore_strings
+            for token_id in tokenizer.encode(text, add_special_tokens=False)
+        }
+        ungraded_token_ids = torch.tensor(sorted(ids), device="cuda")
 
     def compute_loss(micro_batch: dict) -> tuple[torch.Tensor, ...]:
         """Forward pass returning loss and accuracy sums over unmasked tokens."""
@@ -348,25 +350,27 @@ def train(config: SFTConfig):
                 del logits
 
         del out
-        # Accuracy counts only answer content, excluding the configured tag tokens.
-        metric_mask = loss_mask
-        if accuracy_ignore_ids is not None:
-            metric_mask = loss_mask & ~torch.isin(target_ids, accuracy_ignore_ids)
-        correct_sum = correct_tokens[metric_mask].sum()
-        metric_token_count = metric_mask.sum()
-        # A sample is correct when every graded token is the argmax, in which
+        graded_mask = loss_mask
+        if ungraded_token_ids is not None:
+            graded_mask = loss_mask & ~torch.isin(target_ids, ungraded_token_ids)
+        # An answer is correct when every graded token is the argmax, in which
         # case greedy decoding reproduces its content verbatim.
-        flat_mask = metric_mask.flatten()
+        flat_mask = graded_mask.flatten()
         sample_ids = torch.repeat_interleave(
             torch.arange(seq_lens.numel(), device=flat_mask.device), seq_lens.flatten()
         )
-        supervised = torch.zeros(seq_lens.numel(), dtype=torch.long, device=flat_mask.device)
-        supervised.scatter_add_(0, sample_ids, flat_mask.long())
-        wrong = torch.zeros_like(supervised)
-        wrong.scatter_add_(0, sample_ids, (flat_mask & ~correct_tokens.flatten()).long())
-        graded = supervised > 0
+        graded_per_sample = torch.zeros(seq_lens.numel(), dtype=torch.long, device=flat_mask.device)
+        graded_per_sample.scatter_add_(0, sample_ids, flat_mask.long())
+        wrong_per_sample = torch.zeros_like(graded_per_sample)
+        wrong_per_sample.scatter_add_(0, sample_ids, (flat_mask & ~correct_tokens.flatten()).long())
+        graded_samples = graded_per_sample > 0
         accuracy_sums = torch.stack(
-            [correct_sum, metric_token_count, ((wrong == 0) & graded).sum(), graded.sum()]
+            [
+                correct_tokens[graded_mask].sum(),
+                graded_mask.sum(),
+                ((wrong_per_sample == 0) & graded_samples).sum(),
+                graded_samples.sum(),
+            ]
         ).detach()
         return loss_sum, token_count, accuracy_sums
 
