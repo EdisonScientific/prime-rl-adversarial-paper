@@ -1,0 +1,66 @@
+max_steps = 400
+output_dir = "outputs/sft-baseline-smiles2formula"
+
+[deployment]
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[ckpt]
+
+[model]
+name = "Qwen/Qwen3-8B"
+attn = "flash_attention_2"
+optim_cpu_offload = false
+fused_lm_head_token_chunk_size = "disabled"
+
+[data]
+name = "EdisonScientific/smiles2formula-sft"
+seq_len = 2048
+batch_size = 64
+micro_batch_size = 4
+accuracy_ignore_strings = ["<answer>", "</answer>"]
+
+[optim]
+lr = 1e-5
+
+[monitors.wandb]
+project = "sft-baselines"
+name = "smiles2formula-qwen3-8b"
+
+[weight_broadcast]
+type = "nccl"
+port = 29701
+
+[eval]
+env_server_base_port = 5200
+interval = 25
+num_examples = 800
+
+[eval.concurrency]
+initial_inflight = 1056
+max_inflight = 1056
+
+[eval.sampling]
+temperature = 1.0
+max_completion_tokens = 128
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[[eval.source]]
+name = "smiles2formula"
+env.taskset.id = "smiles2formula"
+env.taskset.split = "validation"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[[eval.source]]
+name = "smiles2formula-train"
+num_examples = 256
+env.taskset.id = "smiles2formula"
+env.taskset.split = "train"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[inference]
+
+[inference.server]
+port = 8040
