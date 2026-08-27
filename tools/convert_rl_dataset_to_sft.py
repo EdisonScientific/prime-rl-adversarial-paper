@@ -1,26 +1,35 @@
 """Convert a canonical RL dataset to the prompt/completion format the SFT trainer expects.
 
-Each row becomes a single-turn conversation: the user message is the question from
-info.question and the assistant message is the reference answer, either wrapped in
-<answer> tags (multiplication, smiles2formula) or raw (countdown, whose answer is
-already the solution JSON).
+Each row becomes a single-turn conversation whose shape depends on the preset:
+    answer_tags  user = info.question, assistant = <answer>{answer}</answer> (multiplication, smiles2formula)
+    raw          user = info.question, assistant = answer verbatim (countdown, whose answer is already the solution JSON)
+    grant_title  user = the RL env's title-conditioned question, assistant = <answer>{abstract}</answer>
 
 Usage:
     uv run tools/convert_rl_dataset_to_sft.py EdisonScientific/smiles2formula EdisonScientific/smiles2formula-sft answer_tags
     uv run tools/convert_rl_dataset_to_sft.py EdisonScientific/countdown EdisonScientific/countdown-sft raw
+    uv run tools/convert_rl_dataset_to_sft.py EdisonScientific/grant-abstracts-NIH-fy2026 EdisonScientific/grant-abstracts-NIH-fy2026-sft grant_title
 """
 
 import argparse
 
 from datasets import Dataset, DatasetDict, load_dataset
 
+GRANT_ABSTRACT_QUESTION = "Write the abstract for an NIH grant proposal with the following title.\n{title}"
 
-def to_sft(split: Dataset, completion_style: str) -> Dataset:
+
+def question_and_answer(row: dict, preset: str) -> tuple[str, str]:
+    if preset == "grant_title":
+        return GRANT_ABSTRACT_QUESTION.format(title=row["title"].strip()), row["abstract"].strip()
+    return row["info"]["question"], row["answer"]
+
+
+def to_sft(split: Dataset, preset: str) -> Dataset:
     def convert(row: dict) -> dict:
-        answer = row["answer"]
-        completion = f"<answer>{answer}</answer>" if completion_style == "answer_tags" else answer
+        question, answer = question_and_answer(row, preset)
+        completion = answer if preset == "raw" else f"<answer>{answer}</answer>"
         return {
-            "prompt": [{"role": "user", "content": row["info"]["question"]}],
+            "prompt": [{"role": "user", "content": question}],
             "completion": [{"role": "assistant", "content": completion}],
         }
 
@@ -31,19 +40,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("source", help="Canonical RL dataset on the hub, e.g. EdisonScientific/smiles2formula")
     parser.add_argument("target", help="SFT dataset to push, e.g. EdisonScientific/smiles2formula-sft")
+    parser.add_argument("preset", choices=["answer_tags", "raw", "grant_title"], help="How to build the conversation")
     parser.add_argument(
-        "completion_style", choices=["answer_tags", "raw"], help="Wrap answers in <answer> tags or keep them raw"
+        "--on-overlap",
+        choices=["error", "drop-train"],
+        default="error",
+        help="When a question appears in both splits: refuse, or drop the train rows and keep validation intact",
     )
     args = parser.parse_args()
 
     source = load_dataset(args.source)
-    train_questions = {row["info"]["question"] for row in source["train"]}
-    validation_questions = {row["info"]["question"] for row in source["validation"]}
-    overlap = train_questions & validation_questions
-    if overlap:
+    validation_questions = {question_and_answer(row, args.preset)[0] for row in source["validation"]}
+    train = source["train"]
+    overlap = {q for row in train if (q := question_and_answer(row, args.preset)[0]) in validation_questions}
+    if overlap and args.on_overlap == "error":
         raise ValueError(f"{len(overlap)} questions appear in both train and validation; refusing to build.")
+    if overlap:
+        before = len(train)
+        train = train.filter(lambda row: question_and_answer(row, args.preset)[0] not in validation_questions)
+        print(f"Dropped {before - len(train)} train rows whose question also appears in validation.")
 
-    sft = DatasetDict({split: to_sft(source[split], args.completion_style) for split in ("train", "validation")})
+    sft = DatasetDict({"train": to_sft(train, args.preset), "validation": to_sft(source["validation"], args.preset)})
     print(sft)
     sft.push_to_hub(args.target, private=True)
     print(f"Pushed {args.target}")
