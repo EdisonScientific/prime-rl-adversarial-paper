@@ -1,4 +1,4 @@
-max_steps = 600
+max_steps = 20000
 output_dir = "outputs/sft-baseline-countdown"
 
 [deployment]
@@ -6,6 +6,8 @@ num_train_gpus = 1
 num_infer_gpus = 1
 
 [ckpt]
+interval = 1000
+keep_last = 2
 
 [model]
 name = "Qwen/Qwen3-1.7B"
@@ -24,7 +26,7 @@ lr = 3e-5
 
 [monitors.wandb]
 project = "sft-baselines"
-name = "countdown-qwen3-1.7b"
+name = "countdown-qwen3-1.7b-20ksteps"
 
 [weight_broadcast]
 type = "nccl"
@@ -32,7 +34,7 @@ port = 29601
 
 [eval]
 env_server_base_port = 5100
-interval = 60
+interval = 250
 num_examples = 800
 
 [eval.concurrency]

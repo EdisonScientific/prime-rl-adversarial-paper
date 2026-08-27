@@ -1,4 +1,4 @@
-max_steps = 400
+max_steps = 20000
 output_dir = "outputs/sft-baseline-smiles2formula"
 
 [deployment]
@@ -6,6 +6,8 @@ num_train_gpus = 1
 num_infer_gpus = 1
 
 [ckpt]
+interval = 1000
+keep_last = 2
 
 [model]
 name = "Qwen/Qwen3-8B"
@@ -25,7 +27,7 @@ lr = 1e-5
 
 [monitors.wandb]
 project = "sft-baselines"
-name = "smiles2formula-qwen3-8b"
+name = "smiles2formula-qwen3-8b-20ksteps"
 
 [weight_broadcast]
 type = "nccl"
@@ -33,7 +35,7 @@ port = 29701
 
 [eval]
 env_server_base_port = 5200
-interval = 25
+interval = 250
 num_examples = 800
 
 [eval.concurrency]
