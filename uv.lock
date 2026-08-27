@@ -64,6 +64,7 @@ members = [
     "general-agent",
     "goedel-pset",
     "gpqa",
+    "grant-abstracts",
     "graphwalks",
     "gsm8k",
     "hle",
@@ -2175,6 +2176,17 @@ requires-dist = [
     { name = "openai" },
     { name = "verifiers", specifier = ">=0.2.0" },
 ]
+
+[[package]]
+name = "grant-abstracts"
+version = "0.1.0"
+source = { editable = "environments/grant_abstracts" }
+dependencies = [
+    { name = "datasets" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "datasets" }]
 
 [[package]]
 name = "graphwalks"
