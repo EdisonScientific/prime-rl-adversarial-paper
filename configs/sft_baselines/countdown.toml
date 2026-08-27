@@ -8,7 +8,7 @@ num_infer_gpus = 1
 [ckpt]
 
 [model]
-name = "Qwen/Qwen3-0.6B"
+name = "Qwen/Qwen3-1.7B"
 attn = "flash_attention_2"
 optim_cpu_offload = false
 fused_lm_head_token_chunk_size = "disabled"
@@ -24,7 +24,7 @@ lr = 3e-5
 
 [monitors.wandb]
 project = "sft-baselines"
-name = "countdown-qwen3-0.6b"
+name = "countdown-qwen3-1.7b"
 
 [eval]
 interval = 60
