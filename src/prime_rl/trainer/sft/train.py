@@ -319,10 +319,9 @@ def train(config: SFTConfig):
                     mm_token_type_ids=mm_type_ids,
                     seq_lens_are_pre_shard=seq_lens_are_pre_shard,
                 )
-                target_logprobs = out["logprobs"][loss_mask]
-                loss_sum = -target_logprobs.sum()
                 # p(gold) > 0.5 guarantees the gold token is the argmax.
-                correct_sum = (target_logprobs > -math.log(2.0)).sum()
+                correct_tokens = out["logprobs"] > -math.log(2.0)
+                loss_sum = -out["logprobs"][loss_mask].sum()
             else:
                 out = forward(
                     model,
@@ -336,13 +335,26 @@ def train(config: SFTConfig):
                 logits = out["logits"]
                 B, L, V = logits.shape
                 token_loss = CrossEntropyLoss(reduction="none")(logits.view(-1, V), target_ids.view(-1)).view(B, L)
-                masked_token_loss = token_loss[loss_mask]
-                loss_sum = masked_token_loss.sum()
-                correct_sum = (masked_token_loss < math.log(2.0)).sum()
+                correct_tokens = token_loss < math.log(2.0)
+                loss_sum = token_loss[loss_mask].sum()
                 del logits
 
         del out
-        return loss_sum, token_count, correct_sum
+        correct_sum = correct_tokens[loss_mask].sum()
+        # A sample is correct when every supervised token is the argmax, in which
+        # case greedy decoding reproduces its completion verbatim.
+        flat_mask = loss_mask.flatten()
+        sample_ids = torch.repeat_interleave(
+            torch.arange(seq_lens.numel(), device=flat_mask.device), seq_lens.flatten()
+        )
+        supervised = torch.zeros(seq_lens.numel(), dtype=torch.long, device=flat_mask.device)
+        supervised.scatter_add_(0, sample_ids, flat_mask.long())
+        wrong = torch.zeros_like(supervised)
+        wrong.scatter_add_(0, sample_ids, (flat_mask & ~correct_tokens.flatten()).long())
+        graded = supervised > 0
+        sample_correct_sum = ((wrong == 0) & graded).sum()
+        sample_count = graded.sum()
+        return loss_sum, token_count, correct_sum, sample_correct_sum, sample_count
 
     maybe_record_function = nullcontext
 
@@ -365,7 +377,7 @@ def train(config: SFTConfig):
                 dist.all_reduce(has_data, op=dist.ReduceOp.MIN)
                 if has_data.item() == 0:
                     break
-                loss_sum, token_count, _ = compute_loss(micro_batch)
+                loss_sum, token_count, _, _, _ = compute_loss(micro_batch)
                 if not torch.isnan(loss_sum.detach()):
                     total_loss_sum += loss_sum.detach()
                     total_token_count += token_count
@@ -457,6 +469,8 @@ def train(config: SFTConfig):
 
         step_loss_sum = torch.tensor(0.0, device="cuda")
         step_correct_sum = torch.tensor(0, dtype=torch.int64, device="cuda")
+        step_sample_correct_sum = torch.tensor(0, dtype=torch.int64, device="cuda")
+        step_sample_count = torch.tensor(0, dtype=torch.int64, device="cuda")
         nan_loss_count = torch.tensor(0, device="cuda")
         is_moe_model = is_tt_moe_model(model)
         moe_stats = (
@@ -498,7 +512,9 @@ def train(config: SFTConfig):
                 )
 
             with maybe_record_function("forward"):
-                local_loss_sum, batch_token_count, local_correct_sum = compute_loss(micro_batch)
+                local_loss_sum, batch_token_count, local_correct_sum, local_sample_correct, local_sample_count = (
+                    compute_loss(micro_batch)
+                )
 
             if gradient_manager is None:
                 step_local_token_count += batch_token_count
@@ -510,6 +526,8 @@ def train(config: SFTConfig):
             else:
                 step_loss_sum += local_loss_sum.detach()
                 step_correct_sum += local_correct_sum.detach()
+                step_sample_correct_sum += local_sample_correct.detach()
+                step_sample_count += local_sample_count.detach()
                 scaled_loss = local_loss_sum / grad_accum_steps
 
             with maybe_record_function("backward"):
@@ -546,6 +564,8 @@ def train(config: SFTConfig):
         # Compute the global mean loss for logging.
         dist.all_reduce(step_loss_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
         dist.all_reduce(step_correct_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
+        dist.all_reduce(step_sample_correct_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
+        dist.all_reduce(step_sample_count, op=dist.ReduceOp.SUM, group=dp_cp_group)
         dist.all_reduce(nan_loss_count, op=dist.ReduceOp.SUM)
         if global_token_count_val > 0:
             batch_loss = (step_loss_sum / global_token_count_val).item()
@@ -553,6 +573,8 @@ def train(config: SFTConfig):
         else:
             batch_loss = 0.0
             batch_token_accuracy = 0.0
+        sample_count_val = step_sample_count.item()
+        batch_answer_accuracy = (step_sample_correct_sum.item() / sample_count_val) if sample_count_val > 0 else 0.0
         nan_loss_count = nan_loss_count.item()
 
         grad_norm: torch.Tensor | None = None
@@ -612,7 +634,7 @@ def train(config: SFTConfig):
         step_time = time.perf_counter() - step_start_time
         step_message = (
             f"Step {progress.step} | {format_time(step_time):>7} | Loss {batch_loss:.4f} | "
-            f"Token Acc. {batch_token_accuracy:.4f}"
+            f"Answer Acc. {batch_answer_accuracy:.4f} | Token Acc. {batch_token_accuracy:.4f}"
         )
         if grad_norm is not None:
             step_message += f" | Grad. Norm {grad_norm:.4f}"
@@ -670,6 +692,7 @@ def train(config: SFTConfig):
             "loss/mean": batch_loss,
             "loss/perplexity": math.exp(min(batch_loss, 20)),
             "loss/token_accuracy": batch_token_accuracy,
+            "loss/answer_accuracy": batch_answer_accuracy,
             "loss/nan_count": nan_loss_count,
             "step": progress.step,
         }
