@@ -1,4 +1,4 @@
-max_steps = 1560
+max_steps = 200
 output_dir = "outputs/sft-baseline-multiplication"
 
 [deployment]
@@ -14,8 +14,8 @@ attn = "flash_attention_2"
 [data]
 name = "EdisonScientific/multiplication-sft"
 seq_len = 2048
-batch_size = 256
-micro_batch_size = 32
+batch_size = 128
+micro_batch_size = 8
 
 [optim]
 lr = 3e-5
@@ -25,7 +25,7 @@ project = "sft-baselines"
 name = "multiplication-qwen3-0.6b-20k-b256"
 
 [eval]
-interval = 78
+interval = 20
 num_examples = 800
 
 [eval.concurrency]
