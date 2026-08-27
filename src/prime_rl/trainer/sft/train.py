@@ -261,8 +261,16 @@ def train(config: SFTConfig):
     dp_cp_group = parallel_dims.get_mesh("dp_cp").get_group()
     cp_size = parallel_dims.cp
 
-    def compute_loss(micro_batch: dict) -> tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass returning (loss_sum, token_count) over unmasked tokens."""
+    accuracy_ignore_ids: torch.Tensor | None = None
+    ignore_strings = getattr(config.data, "accuracy_ignore_strings", [])
+    if ignore_strings:
+        ignore_ids = sorted(
+            {token_id for text in ignore_strings for token_id in tokenizer.encode(text, add_special_tokens=False)}
+        )
+        accuracy_ignore_ids = torch.tensor(ignore_ids, device="cuda")
+
+    def compute_loss(micro_batch: dict) -> tuple[torch.Tensor, ...]:
+        """Forward pass returning loss and accuracy sums over unmasked tokens."""
         input_ids = micro_batch["input_ids"].to("cuda", non_blocking=True)
         position_ids = micro_batch["position_ids"].to("cuda", non_blocking=True)
         target_ids = micro_batch["target_ids"].to("cuda", non_blocking=True)
@@ -340,10 +348,15 @@ def train(config: SFTConfig):
                 del logits
 
         del out
-        correct_sum = correct_tokens[loss_mask].sum()
-        # A sample is correct when every supervised token is the argmax, in which
-        # case greedy decoding reproduces its completion verbatim.
-        flat_mask = loss_mask.flatten()
+        # Accuracy counts only answer content, excluding the configured tag tokens.
+        metric_mask = loss_mask
+        if accuracy_ignore_ids is not None:
+            metric_mask = loss_mask & ~torch.isin(target_ids, accuracy_ignore_ids)
+        correct_sum = correct_tokens[metric_mask].sum()
+        metric_token_count = metric_mask.sum()
+        # A sample is correct when every graded token is the argmax, in which
+        # case greedy decoding reproduces its content verbatim.
+        flat_mask = metric_mask.flatten()
         sample_ids = torch.repeat_interleave(
             torch.arange(seq_lens.numel(), device=flat_mask.device), seq_lens.flatten()
         )
@@ -354,7 +367,7 @@ def train(config: SFTConfig):
         graded = supervised > 0
         sample_correct_sum = ((wrong == 0) & graded).sum()
         sample_count = graded.sum()
-        return loss_sum, token_count, correct_sum, sample_correct_sum, sample_count
+        return loss_sum, token_count, correct_sum, metric_token_count, sample_correct_sum, sample_count
 
     maybe_record_function = nullcontext
 
@@ -377,7 +390,7 @@ def train(config: SFTConfig):
                 dist.all_reduce(has_data, op=dist.ReduceOp.MIN)
                 if has_data.item() == 0:
                     break
-                loss_sum, token_count, _, _, _ = compute_loss(micro_batch)
+                loss_sum, token_count, *_ = compute_loss(micro_batch)
                 if not torch.isnan(loss_sum.detach()):
                     total_loss_sum += loss_sum.detach()
                     total_token_count += token_count
@@ -469,6 +482,7 @@ def train(config: SFTConfig):
 
         step_loss_sum = torch.tensor(0.0, device="cuda")
         step_correct_sum = torch.tensor(0, dtype=torch.int64, device="cuda")
+        step_metric_token_count = torch.tensor(0, dtype=torch.int64, device="cuda")
         step_sample_correct_sum = torch.tensor(0, dtype=torch.int64, device="cuda")
         step_sample_count = torch.tensor(0, dtype=torch.int64, device="cuda")
         nan_loss_count = torch.tensor(0, device="cuda")
@@ -512,9 +526,14 @@ def train(config: SFTConfig):
                 )
 
             with maybe_record_function("forward"):
-                local_loss_sum, batch_token_count, local_correct_sum, local_sample_correct, local_sample_count = (
-                    compute_loss(micro_batch)
-                )
+                (
+                    local_loss_sum,
+                    batch_token_count,
+                    local_correct_sum,
+                    local_metric_token_count,
+                    local_sample_correct,
+                    local_sample_count,
+                ) = compute_loss(micro_batch)
 
             if gradient_manager is None:
                 step_local_token_count += batch_token_count
@@ -526,6 +545,7 @@ def train(config: SFTConfig):
             else:
                 step_loss_sum += local_loss_sum.detach()
                 step_correct_sum += local_correct_sum.detach()
+                step_metric_token_count += local_metric_token_count.detach()
                 step_sample_correct_sum += local_sample_correct.detach()
                 step_sample_count += local_sample_count.detach()
                 scaled_loss = local_loss_sum / grad_accum_steps
@@ -564,15 +584,15 @@ def train(config: SFTConfig):
         # Compute the global mean loss for logging.
         dist.all_reduce(step_loss_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
         dist.all_reduce(step_correct_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
+        dist.all_reduce(step_metric_token_count, op=dist.ReduceOp.SUM, group=dp_cp_group)
         dist.all_reduce(step_sample_correct_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
         dist.all_reduce(step_sample_count, op=dist.ReduceOp.SUM, group=dp_cp_group)
         dist.all_reduce(nan_loss_count, op=dist.ReduceOp.SUM)
-        if global_token_count_val > 0:
-            batch_loss = (step_loss_sum / global_token_count_val).item()
-            batch_token_accuracy = (step_correct_sum / global_token_count_val).item()
-        else:
-            batch_loss = 0.0
-            batch_token_accuracy = 0.0
+        batch_loss = (step_loss_sum / global_token_count_val).item() if global_token_count_val > 0 else 0.0
+        metric_token_count_val = step_metric_token_count.item()
+        batch_token_accuracy = (
+            (step_correct_sum.item() / metric_token_count_val) if metric_token_count_val > 0 else 0.0
+        )
         sample_count_val = step_sample_count.item()
         batch_answer_accuracy = (step_sample_correct_sum.item() / sample_count_val) if sample_count_val > 0 else 0.0
         nan_loss_count = nan_loss_count.item()

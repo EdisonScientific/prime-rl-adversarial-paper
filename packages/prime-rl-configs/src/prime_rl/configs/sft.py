@@ -113,6 +113,9 @@ class SFTDataConfig(BaseDataConfig):
     loss_mask: LossMaskConfig = LossMaskConfig()
     """Which message types contribute to the loss."""
 
+    accuracy_ignore_strings: list[str] = []
+    """Strings whose tokens are excluded from the accuracy metrics (not the loss), e.g. answer tags."""
+
     @model_validator(mode="after")
     def validate_subsets_and_splits(self):
         if self.subsets is not None or self.splits is not None:
