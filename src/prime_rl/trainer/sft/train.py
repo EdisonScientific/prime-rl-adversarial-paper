@@ -319,7 +319,10 @@ def train(config: SFTConfig):
                     mm_token_type_ids=mm_type_ids,
                     seq_lens_are_pre_shard=seq_lens_are_pre_shard,
                 )
-                loss_sum = -out["logprobs"][loss_mask].sum()
+                target_logprobs = out["logprobs"][loss_mask]
+                loss_sum = -target_logprobs.sum()
+                # p(gold) > 0.5 guarantees the gold token is the argmax.
+                correct_sum = (target_logprobs > -math.log(2.0)).sum()
             else:
                 out = forward(
                     model,
@@ -333,11 +336,13 @@ def train(config: SFTConfig):
                 logits = out["logits"]
                 B, L, V = logits.shape
                 token_loss = CrossEntropyLoss(reduction="none")(logits.view(-1, V), target_ids.view(-1)).view(B, L)
-                loss_sum = token_loss[loss_mask].sum()
+                masked_token_loss = token_loss[loss_mask]
+                loss_sum = masked_token_loss.sum()
+                correct_sum = (masked_token_loss < math.log(2.0)).sum()
                 del logits
 
         del out
-        return loss_sum, token_count
+        return loss_sum, token_count, correct_sum
 
     maybe_record_function = nullcontext
 
@@ -360,7 +365,7 @@ def train(config: SFTConfig):
                 dist.all_reduce(has_data, op=dist.ReduceOp.MIN)
                 if has_data.item() == 0:
                     break
-                loss_sum, token_count = compute_loss(micro_batch)
+                loss_sum, token_count, _ = compute_loss(micro_batch)
                 if not torch.isnan(loss_sum.detach()):
                     total_loss_sum += loss_sum.detach()
                     total_token_count += token_count
@@ -451,6 +456,7 @@ def train(config: SFTConfig):
         forward_backward_start_time = time.perf_counter()
 
         step_loss_sum = torch.tensor(0.0, device="cuda")
+        step_correct_sum = torch.tensor(0, dtype=torch.int64, device="cuda")
         nan_loss_count = torch.tensor(0, device="cuda")
         is_moe_model = is_tt_moe_model(model)
         moe_stats = (
@@ -492,7 +498,7 @@ def train(config: SFTConfig):
                 )
 
             with maybe_record_function("forward"):
-                local_loss_sum, batch_token_count = compute_loss(micro_batch)
+                local_loss_sum, batch_token_count, local_correct_sum = compute_loss(micro_batch)
 
             if gradient_manager is None:
                 step_local_token_count += batch_token_count
@@ -503,6 +509,7 @@ def train(config: SFTConfig):
                 scaled_loss = torch.nan_to_num(local_loss_sum, nan=0.0) / grad_accum_steps
             else:
                 step_loss_sum += local_loss_sum.detach()
+                step_correct_sum += local_correct_sum.detach()
                 scaled_loss = local_loss_sum / grad_accum_steps
 
             with maybe_record_function("backward"):
@@ -538,11 +545,14 @@ def train(config: SFTConfig):
 
         # Compute the global mean loss for logging.
         dist.all_reduce(step_loss_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
+        dist.all_reduce(step_correct_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
         dist.all_reduce(nan_loss_count, op=dist.ReduceOp.SUM)
         if global_token_count_val > 0:
             batch_loss = (step_loss_sum / global_token_count_val).item()
+            batch_token_accuracy = (step_correct_sum / global_token_count_val).item()
         else:
             batch_loss = 0.0
+            batch_token_accuracy = 0.0
         nan_loss_count = nan_loss_count.item()
 
         grad_norm: torch.Tensor | None = None
@@ -600,7 +610,10 @@ def train(config: SFTConfig):
 
         # Log step metrics
         step_time = time.perf_counter() - step_start_time
-        step_message = f"Step {progress.step} | {format_time(step_time):>7} | Loss {batch_loss:.4f}"
+        step_message = (
+            f"Step {progress.step} | {format_time(step_time):>7} | Loss {batch_loss:.4f} | "
+            f"Token Acc. {batch_token_accuracy:.4f}"
+        )
         if grad_norm is not None:
             step_message += f" | Grad. Norm {grad_norm:.4f}"
         step_message += f" | LR {current_lr:.2e} | Throughput {throughput:.0f} tokens/s | MFU {mfu:.1f}% | Peak Mem. {peak_memory:.1f}/{max_memory:.1f} GiB ({peak_memory / max_memory * 100:.1f}%)"
@@ -656,6 +669,7 @@ def train(config: SFTConfig):
         loss_log_metrics = {
             "loss/mean": batch_loss,
             "loss/perplexity": math.exp(min(batch_loss, 20)),
+            "loss/token_accuracy": batch_token_accuracy,
             "loss/nan_count": nan_loss_count,
             "step": progress.step,
         }
