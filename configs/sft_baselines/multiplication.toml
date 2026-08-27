@@ -1,4 +1,4 @@
-max_steps = 240
+max_steps = 1560
 output_dir = "outputs/sft-baseline-multiplication"
 
 [deployment]
