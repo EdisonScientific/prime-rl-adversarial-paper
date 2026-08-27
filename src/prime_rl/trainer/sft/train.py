@@ -590,9 +590,7 @@ def train(config: SFTConfig):
         dist.all_reduce(nan_loss_count, op=dist.ReduceOp.SUM)
         batch_loss = (step_loss_sum / global_token_count_val).item() if global_token_count_val > 0 else 0.0
         metric_token_count_val = step_metric_token_count.item()
-        batch_token_accuracy = (
-            (step_correct_sum.item() / metric_token_count_val) if metric_token_count_val > 0 else 0.0
-        )
+        batch_token_accuracy = (step_correct_sum.item() / metric_token_count_val) if metric_token_count_val > 0 else 0.0
         sample_count_val = step_sample_count.item()
         batch_answer_accuracy = (step_sample_correct_sum.item() / sample_count_val) if sample_count_val > 0 else 0.0
         nan_loss_count = nan_loss_count.item()

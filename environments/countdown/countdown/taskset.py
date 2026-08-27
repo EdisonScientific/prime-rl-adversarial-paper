@@ -55,11 +55,7 @@ def countdown_files(text: str) -> dict[str, str] | None:
 
 async def canonical_test_passes(solution: str) -> bool:
     script = (
-        "import math\n"
-        "import random\n"
-        f"{solution}\n"
-        f"{COUNTDOWN_TEST_PY}\n"
-        "print(verify_solution(numbers, target, expr))"
+        f"import math\nimport random\n{solution}\n{COUNTDOWN_TEST_PY}\nprint(verify_solution(numbers, target, expr))"
     )
     process = await asyncio.create_subprocess_exec(
         sys.executable,
