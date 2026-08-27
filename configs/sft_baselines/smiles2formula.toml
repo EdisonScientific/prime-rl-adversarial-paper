@@ -35,7 +35,7 @@ port = 29701
 
 [eval]
 env_server_base_port = 5200
-interval = 250
+interval = 100
 num_examples = 800
 
 [eval.concurrency]
