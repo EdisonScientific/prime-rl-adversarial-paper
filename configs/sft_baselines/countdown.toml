@@ -1,31 +1,17 @@
-max_steps = 20000
 output_dir = "outputs/sft-baseline-countdown"
-
-[deployment]
-num_train_gpus = 1
-num_infer_gpus = 1
-
-[ckpt]
-interval = 1000
-keep_last = 2
 
 [model]
 name = "Qwen/Qwen3-1.7B"
-attn = "flash_attention_2"
-optim_cpu_offload = false
-fused_lm_head_token_chunk_size = "disabled"
 
 [data]
 name = "EdisonScientific/countdown-sft"
 seq_len = 4096
 batch_size = 128
-micro_batch_size = 8
 
 [optim]
 lr = 3e-5
 
 [monitors.wandb]
-project = "sft-baselines"
 name = "countdown-qwen3-1.7b-20ksteps"
 
 [weight_broadcast]
@@ -34,17 +20,9 @@ port = 29601
 
 [eval]
 env_server_base_port = 5100
-interval = 100
-num_examples = 800
-
-[eval.concurrency]
-initial_inflight = 1056
-max_inflight = 1056
 
 [eval.sampling]
-temperature = 1.0
 max_completion_tokens = 1024
-extra_body = { chat_template_kwargs = { enable_thinking = false } }
 
 [[eval.source]]
 name = "countdown"
@@ -60,8 +38,6 @@ env.taskset.id = "countdown"
 env.taskset.split = "train"
 env.agent.harness.id = "null"
 env.agent.runtime.type = "subprocess"
-
-[inference]
 
 [inference.server]
 port = 8020

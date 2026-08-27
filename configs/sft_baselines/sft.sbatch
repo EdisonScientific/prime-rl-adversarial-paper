@@ -25,4 +25,4 @@ export WANDB_ENTITY="${WANDB_ENTITY:-edison-scientific}"
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS=1
 
-uv run --no-sync sft @ "configs/sft_baselines/${CONFIG_NAME}.toml" "${@:2}"
+uv run --no-sync sft @ configs/sft_baselines/base.toml @ "configs/sft_baselines/${CONFIG_NAME}.toml" "${@:2}"

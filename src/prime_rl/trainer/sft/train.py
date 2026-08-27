@@ -365,9 +365,10 @@ def train(config: SFTConfig):
         wrong = torch.zeros_like(supervised)
         wrong.scatter_add_(0, sample_ids, (flat_mask & ~correct_tokens.flatten()).long())
         graded = supervised > 0
-        sample_correct_sum = ((wrong == 0) & graded).sum()
-        sample_count = graded.sum()
-        return loss_sum, token_count, correct_sum, metric_token_count, sample_correct_sum, sample_count
+        accuracy_sums = torch.stack(
+            [correct_sum, metric_token_count, ((wrong == 0) & graded).sum(), graded.sum()]
+        ).detach()
+        return loss_sum, token_count, accuracy_sums
 
     maybe_record_function = nullcontext
 
@@ -481,10 +482,8 @@ def train(config: SFTConfig):
         forward_backward_start_time = time.perf_counter()
 
         step_loss_sum = torch.tensor(0.0, device="cuda")
-        step_correct_sum = torch.tensor(0, dtype=torch.int64, device="cuda")
-        step_metric_token_count = torch.tensor(0, dtype=torch.int64, device="cuda")
-        step_sample_correct_sum = torch.tensor(0, dtype=torch.int64, device="cuda")
-        step_sample_count = torch.tensor(0, dtype=torch.int64, device="cuda")
+        # correct tokens, graded tokens, correct answers, graded answers
+        step_accuracy_sums = torch.zeros(4, dtype=torch.int64, device="cuda")
         nan_loss_count = torch.tensor(0, device="cuda")
         is_moe_model = is_tt_moe_model(model)
         moe_stats = (
@@ -526,14 +525,7 @@ def train(config: SFTConfig):
                 )
 
             with maybe_record_function("forward"):
-                (
-                    local_loss_sum,
-                    batch_token_count,
-                    local_correct_sum,
-                    local_metric_token_count,
-                    local_sample_correct,
-                    local_sample_count,
-                ) = compute_loss(micro_batch)
+                local_loss_sum, batch_token_count, local_accuracy_sums = compute_loss(micro_batch)
 
             if gradient_manager is None:
                 step_local_token_count += batch_token_count
@@ -544,10 +536,7 @@ def train(config: SFTConfig):
                 scaled_loss = torch.nan_to_num(local_loss_sum, nan=0.0) / grad_accum_steps
             else:
                 step_loss_sum += local_loss_sum.detach()
-                step_correct_sum += local_correct_sum.detach()
-                step_metric_token_count += local_metric_token_count.detach()
-                step_sample_correct_sum += local_sample_correct.detach()
-                step_sample_count += local_sample_count.detach()
+                step_accuracy_sums += local_accuracy_sums
                 scaled_loss = local_loss_sum / grad_accum_steps
 
             with maybe_record_function("backward"):
@@ -583,16 +572,15 @@ def train(config: SFTConfig):
 
         # Compute the global mean loss for logging.
         dist.all_reduce(step_loss_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
-        dist.all_reduce(step_correct_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
-        dist.all_reduce(step_metric_token_count, op=dist.ReduceOp.SUM, group=dp_cp_group)
-        dist.all_reduce(step_sample_correct_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
-        dist.all_reduce(step_sample_count, op=dist.ReduceOp.SUM, group=dp_cp_group)
+        dist.all_reduce(step_accuracy_sums, op=dist.ReduceOp.SUM, group=dp_cp_group)
         dist.all_reduce(nan_loss_count, op=dist.ReduceOp.SUM)
-        batch_loss = (step_loss_sum / global_token_count_val).item() if global_token_count_val > 0 else 0.0
-        metric_token_count_val = step_metric_token_count.item()
-        batch_token_accuracy = (step_correct_sum.item() / metric_token_count_val) if metric_token_count_val > 0 else 0.0
-        sample_count_val = step_sample_count.item()
-        batch_answer_accuracy = (step_sample_correct_sum.item() / sample_count_val) if sample_count_val > 0 else 0.0
+        if global_token_count_val > 0:
+            batch_loss = (step_loss_sum / global_token_count_val).item()
+        else:
+            batch_loss = 0.0
+        correct_tokens_sum, graded_tokens, correct_answers, graded_answers = step_accuracy_sums.tolist()
+        batch_token_accuracy = correct_tokens_sum / graded_tokens if graded_tokens > 0 else 0.0
+        batch_answer_accuracy = correct_answers / graded_answers if graded_answers > 0 else 0.0
         nan_loss_count = nan_loss_count.item()
 
         grad_norm: torch.Tensor | None = None

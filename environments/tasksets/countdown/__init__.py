@@ -1,14 +1,11 @@
-"""countdown: two-file Countdown coding tasks. A completion is a JSON object
-with solution.py and test.py after an optional reasoning block; the reward runs
-the submitted solution against the canonical test file, so a modified test.py
-cannot game it."""
+"""The reward runs the submitted solution.py against the canonical test file,
+so a modified test.py cannot game it."""
 
 import asyncio
 import json
 import sys
 
-import verifiers.v1 as vf
-from taskset_common import AnswerData, CanonicalConfig, load_tasks
+from taskset_common import make_taskset
 
 COUNTDOWN_TEST_PY = """\
 def verify_solution(numbers, target, expr) -> bool:
@@ -69,23 +66,13 @@ async def canonical_test_passes(solution: str) -> bool:
     return process.returncode == 0 and stdout.decode().strip() == "True"
 
 
-class CountdownTask(vf.Task[AnswerData]):
-    @vf.reward(weight=1.0)
-    async def correct(self, trace: vf.Trace, runtime: vf.Runtime) -> float:
-        reply = trace.last_reply or ""
-        files = countdown_files(reply.rpartition("</think>")[2].strip())
-        if files is None or not files["solution.py"].strip():
-            return 0.0
-        return float(await canonical_test_passes(files["solution.py"].strip()))
+async def verifiable_reward(reply: str, reference: str) -> float:
+    files = countdown_files(reply.rpartition("</think>")[2].strip())
+    if files is None or not files["solution.py"].strip():
+        return 0.0
+    return float(await canonical_test_passes(files["solution.py"].strip()))
 
 
-class CountdownConfig(CanonicalConfig):
-    dataset: str = "EdisonScientific/countdown"
-
-
-class CountdownTaskset(vf.Taskset[CountdownTask, CountdownConfig]):
-    def load(self) -> list[CountdownTask]:
-        return load_tasks(self, CountdownTask)
-
+CountdownTaskset = make_taskset("Countdown", "EdisonScientific/countdown", verifiable_reward)
 
 __all__ = ["CountdownTaskset"]

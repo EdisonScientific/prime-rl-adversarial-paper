@@ -1,14 +1,9 @@
 """Convert a canonical RL dataset to the prompt/completion format the SFT trainer expects.
 
-Each row becomes a single-turn conversation whose shape depends on the preset:
+Presets:
     answer_tags  user = info.question, assistant = <answer>{answer}</answer> (multiplication, smiles2formula)
     raw          user = info.question, assistant = answer verbatim (countdown, whose answer is already the solution JSON)
     grant_title  user = the RL env's title-conditioned question, assistant = <answer>{abstract}</answer>
-
-Usage:
-    uv run tools/convert_rl_dataset_to_sft.py EdisonScientific/smiles2formula EdisonScientific/smiles2formula-sft answer_tags
-    uv run tools/convert_rl_dataset_to_sft.py EdisonScientific/countdown EdisonScientific/countdown-sft raw
-    uv run tools/convert_rl_dataset_to_sft.py EdisonScientific/grant-abstracts-NIH-fy2026 EdisonScientific/grant-abstracts-NIH-fy2026-sft grant_title
 """
 
 import argparse

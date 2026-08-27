@@ -1,0 +1,41 @@
+max_steps = 20000
+
+[deployment]
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[ckpt]
+interval = 1000
+keep_last = 2
+
+[model]
+attn = "flash_attention_2"
+optim_cpu_offload = false
+fused_lm_head_token_chunk_size = "disabled"
+
+[data]
+seq_len = 2048
+batch_size = 64
+micro_batch_size = 8
+accuracy_ignore_strings = ["<answer>", "</answer>"]
+
+[optim]
+lr = 2e-5
+
+[monitors.wandb]
+project = "sft-baselines"
+
+[eval]
+interval = 100
+num_examples = 800
+
+[eval.concurrency]
+initial_inflight = 1056
+max_inflight = 1056
+
+[eval.sampling]
+temperature = 1.0
+max_completion_tokens = 128
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[inference]
