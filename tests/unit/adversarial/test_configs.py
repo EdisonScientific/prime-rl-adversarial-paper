@@ -6,8 +6,10 @@ from prime_rl.configs.adversarial import AdversarialRLConfig
 from prime_rl.utils.config import cli
 
 CONFIG_DIR = Path("configs/adversarial/test")
+EXPERIMENT_DIR = Path("configs/adversarial/experiments")
 ENVS = ["multiplication", "countdown_code", "smiles_to_formula", "grant_abstract", "paper_abstract"]
 OVERLAYS = [[], ["pairwise"], ["lora"], ["short"], ["8b14b"], ["pairwise", "lora", "short"]]
+EXPERIMENTS = [("smiles_to_formula", "smiles2formula_8b32b")]
 
 
 @pytest.mark.parametrize("overlays", OVERLAYS, ids=lambda overlays: "+".join(overlays) or "plain")
@@ -17,4 +19,12 @@ def test_composed_recipes_validate(env: str, overlays: list[str]):
     args = []
     for name in ["base", env, *overlays]:
         args += ["@", (CONFIG_DIR / f"{name}.toml").as_posix()]
+    cli(AdversarialRLConfig, args=args)
+
+
+@pytest.mark.parametrize(("env", "experiment"), EXPERIMENTS)
+def test_experiment_recipes_validate(env: str, experiment: str):
+    args = []
+    for path in [CONFIG_DIR / "base.toml", CONFIG_DIR / f"{env}.toml", EXPERIMENT_DIR / f"{experiment}.toml"]:
+        args += ["@", path.as_posix()]
     cli(AdversarialRLConfig, args=args)
