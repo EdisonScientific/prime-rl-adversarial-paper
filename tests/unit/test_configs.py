@@ -36,7 +36,9 @@ def get_config_files() -> list[Path]:
     # stale key there breaks a deploy with nothing else to catch it.
     k8s_files = list(Path("k8s").rglob("*.toml"))
 
-    return config_files + example_files + k8s_files
+    # Underscore-prefixed files are partial layers merged via multiple `@` files
+    # (e.g. `sft @ _base.toml @ task.toml`), not standalone configs.
+    return [f for f in config_files + example_files + k8s_files if not f.name.startswith("_")]
 
 
 @pytest.mark.parametrize("config_file", get_config_files(), ids=lambda x: x.as_posix())
