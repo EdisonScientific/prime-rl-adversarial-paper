@@ -1,7 +1,7 @@
 import asyncio
 import time
 from dataclasses import dataclass
-from statistics import fmean
+from statistics import correlation, fmean
 from typing import Any
 
 import verifiers as vf
@@ -262,6 +262,24 @@ def generated_win_probability(slot_a_probability: float | None, first_label: flo
     if slot_a_probability is None:
         return None
     return slot_a_probability if first_label == 0.0 else 1.0 - slot_a_probability
+
+
+def judge_verifiable_correlation(rollouts: list[vf.RolloutOutput]) -> float | None:
+    """Pearson correlation between the judge probability and the verifiable reward,
+    over the rollouts carrying both. None when the env has no verifiable reward or
+    either value is constant across the batch (e.g. no correct answer yet)."""
+    pairs = [
+        (metrics["judge_reference_probability_proxy"], float(metrics["verifiable_reward"]))
+        for rollout in rollouts
+        if (metrics := rollout["metrics"]).get("judge_reference_probability_proxy") is not None
+        and metrics.get("verifiable_reward") is not None
+    ]
+    if len(pairs) < 2:
+        return None
+    probabilities, rewards = zip(*pairs)
+    if len(set(probabilities)) < 2 or len(set(rewards)) < 2:
+        return None
+    return correlation(probabilities, rewards)
 
 
 async def score_and_build_judge_batch(
@@ -598,6 +616,9 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             }
             for key, values in generator_metrics.items():
                 log_values[f"train/generator/metrics/{key}/mean"] = fmean(values)
+            judge_alignment = judge_verifiable_correlation(generator_rollouts)
+            if judge_alignment is not None:
+                log_values["train/generator/metrics/judge_verifiable_correlation"] = judge_alignment
             max_completion_tokens = generator.sampling_args.get("max_completion_tokens")
             if max_completion_tokens:
                 log_values["train/generator/metrics/is_truncated/mean"] = fmean(
