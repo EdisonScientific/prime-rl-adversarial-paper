@@ -74,4 +74,3 @@ def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
     if kind == "judge":
         return BinaryJudgeEnv(**kwargs)
     raise ValueError("multiplication adversarial env kind must be generator or judge.")
-

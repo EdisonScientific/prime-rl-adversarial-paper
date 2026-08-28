@@ -29,7 +29,9 @@ def load_environment(kind: str = "generator", task: str | None = None, **kwargs:
         loader = _GENERATOR_LOADERS[task]
     except KeyError:
         supported_tasks = ", ".join(sorted(_GENERATOR_LOADERS))
-        raise ValueError(f"unsupported adversarial generator task {task!r}; expected one of: {supported_tasks}") from None
+        raise ValueError(
+            f"unsupported adversarial generator task {task!r}; expected one of: {supported_tasks}"
+        ) from None
     return loader(kind=kind, **kwargs)
 
 

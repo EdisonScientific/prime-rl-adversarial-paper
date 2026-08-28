@@ -51,7 +51,10 @@ class RoleRuntime:
     train_step: int = 0
 
     def sampling_args_with_salt(self, cache_salt: str) -> dict[str, Any]:
-        return {**self.sampling_args, "extra_body": {**self.sampling_args.get("extra_body", {}), "cache_salt": cache_salt}}
+        return {
+            **self.sampling_args,
+            "extra_body": {**self.sampling_args.get("extra_body", {}), "cache_salt": cache_salt},
+        }
 
 
 @dataclass
@@ -93,13 +96,15 @@ def require_config(config: AdversarialRLConfig) -> None:
     pairwise = config.judge_objective == "pairwise"
     max_judge_batch_size = gen.batch_size if pairwise else 2 * gen.batch_size
     if judge.batch_size > max_judge_batch_size:
-        raise ValueError(f"judge batch_size must be at most {max_judge_batch_size} for judge_objective={config.judge_objective}.")
+        raise ValueError(
+            f"judge batch_size must be at most {max_judge_batch_size} for judge_objective={config.judge_objective}."
+        )
     if bool(judge.train.env.args.get("pairwise")) != pairwise:
         raise ValueError("the judge env args must set pairwise = true exactly when judge_objective is pairwise.")
     if judge.group_size != 1:
         raise ValueError("judge group_size must be 1 for classifier training.")
 
-        
+
 def legacy_train_client(orch) -> vf.ClientConfig:
     """Rollout client for the legacy verifiers envs. The upstream ``setup_client``
     builds verifiers.v1 client configs, which legacy ``run_rollout`` rejects."""
@@ -233,7 +238,9 @@ async def run_judge_rollout(
     return output
 
 
-def single_candidate_judge_tasks(env: Any, question: str, reference: str, candidate: str) -> list[tuple[str, float, str]]:
+def single_candidate_judge_tasks(
+    env: Any, question: str, reference: str, candidate: str
+) -> list[tuple[str, float, str]]:
     """One judge call per answer as ``(prompt, label, kind)``. Label 1.0 means the correct choice is A."""
     return [
         (env.adversarial_judge_prompt(question, candidate), 0.0, "generated"),
@@ -422,7 +429,9 @@ async def wait_and_update(runtime: RoleRuntime, next_step: int) -> None:
     runtime.train_step = next_step
 
 
-def should_skip_judge_update(config: AdversarialRLConfig, state: JudgeUpdateGateState, step: int, accuracy: float) -> bool:
+def should_skip_judge_update(
+    config: AdversarialRLConfig, state: JudgeUpdateGateState, step: int, accuracy: float
+) -> bool:
     gate = config.judge_update_gate
     if not gate.enabled:
         return False
@@ -511,9 +520,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 ),
             }
             await monitors.log(eval_log_values, step=0)
-            logger.success(
-                f"Step 0 eval | Eval reward: {eval_log_values['eval/generator/reward/mean']:.4f}"
-            )
+            logger.success(f"Step 0 eval | Eval reward: {eval_log_values['eval/generator/reward/mean']:.4f}")
 
         for step in range(start_step, get_max_steps(config.generator)):
             step_start = time.perf_counter()
@@ -616,9 +623,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                     step_path / "eval_generator_rollouts.jsonl",
                     exclude_keys={"trajectory"},
                 )
-                log_values["eval/generator/reward/mean"] = fmean(
-                    float(rollout["reward"]) for rollout in eval_rollouts
-                )
+                log_values["eval/generator/reward/mean"] = fmean(float(rollout["reward"]) for rollout in eval_rollouts)
                 log_values["eval/generator/metrics/verifiable_reward/mean"] = fmean(
                     float(r["metrics"]["verifiable_reward"]) for r in eval_rollouts
                 )

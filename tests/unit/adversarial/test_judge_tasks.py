@@ -21,9 +21,9 @@ def test_single_candidate_scores_each_answer_separately():
 
 
 def test_pairwise_label_is_the_reference_slot():
-    (prompt, label, kind), = pairwise_judge_tasks(StubEnv(), "q", "ref", "gen", reference_first=True)
+    ((prompt, label, kind),) = pairwise_judge_tasks(StubEnv(), "q", "ref", "gen", reference_first=True)
     assert (prompt, label, kind) == ("q|A=ref|B=gen", 1.0, "pairwise")
-    (prompt, label, kind), = pairwise_judge_tasks(StubEnv(), "q", "ref", "gen", reference_first=False)
+    ((prompt, label, kind),) = pairwise_judge_tasks(StubEnv(), "q", "ref", "gen", reference_first=False)
     assert (prompt, label, kind) == ("q|A=gen|B=ref", 0.0, "pairwise")
 
 

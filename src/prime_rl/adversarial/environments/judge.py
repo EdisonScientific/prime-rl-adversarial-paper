@@ -50,4 +50,3 @@ class BinaryJudgeEnv(vf.SingleTurnEnv):
                 chosen_probability = min(max(math.exp(float(logprobs[0])), 0.0), 1.0)
                 return chosen_probability if choice == "A" else 1.0 - chosen_probability
         return None
-

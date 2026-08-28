@@ -19,7 +19,9 @@ from prime_rl.utils.config import BaseConfig
 
 class JudgeUpdateGateConfig(BaseConfig):
     enabled: bool = Field(False, description="Skip judge updates while the judge is accurate enough.")
-    accuracy_threshold: float = Field(0.9, ge=0.0, le=1.0, description="Skip when the accuracy EMA is at or above this.")
+    accuracy_threshold: float = Field(
+        0.9, ge=0.0, le=1.0, description="Skip when the accuracy EMA is at or above this."
+    )
     ema_decay: float = Field(0.95, ge=0.0, lt=1.0, description="Decay of the judge-accuracy EMA the gate tracks.")
     warmup_steps: int = Field(0, ge=0, description="Steps to always train the judge before the gate can skip.")
     max_skip_streak: int | None = Field(

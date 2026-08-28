@@ -26,7 +26,7 @@ keep_last = 2
 attn = "flash_attention_2"
 
 [generator.trainer.loss]
-type = "default"
+type = "ipo"
 kl_tau = 0.02
 
 [generator.trainer.optim]
@@ -81,7 +81,7 @@ attn = "flash_attention_2"
 fused_lm_head_token_chunk_size = "disabled"
 
 [judge.trainer.loss]
-type = "default"
+type = "ipo"
 kl_tau = 0.0
 
 [judge.trainer.optim]

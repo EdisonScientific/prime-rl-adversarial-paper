@@ -48,7 +48,9 @@ class GeneratorEnv(vf.SingleTurnEnv):
     async def placeholder_reward(self, completions, **kwargs) -> list[float]:
         return [0.0 for _ in completions]
 
-    def generator_result(self, candidate: Any, format_ok: bool, verifiable_reward: float | None = None) -> dict[str, Any]:
+    def generator_result(
+        self, candidate: Any, format_ok: bool, verifiable_reward: float | None = None
+    ) -> dict[str, Any]:
         result = {
             "candidate": "" if candidate is None else str(candidate),
             "format_ok": format_ok,
