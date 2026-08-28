@@ -62,8 +62,10 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         candidate = self.adversarial_candidate_answer(completion)
-        # A candidate is well-formed when the formula regex tiles it exactly. The
-        # verifiable reward is zero L1 atom-count distance to the target formula.
+        # Format only requires the answer block, so any tag-valid answer goes to
+        # the judge. The verifiable reward additionally requires a well-formed
+        # formula (the formula regex tiles it exactly) at zero L1 atom-count
+        # distance to the target.
         formula_l1 = None
         if candidate:
             parts = list(FORMULA_RE.finditer(candidate))
@@ -72,7 +74,10 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
                 target_counts = formula_atom_counts(self.adversarial_reference_answer(example))
                 elements = set(candidate_counts) | set(target_counts)
                 formula_l1 = float(sum(abs(candidate_counts[el] - target_counts[el]) for el in elements))
-        return self.generator_result(candidate, formula_l1 is not None, float(formula_l1 == 0.0))
+        result = self.generator_result(candidate, candidate is not None, float(formula_l1 == 0.0))
+        if candidate is not None:
+            result["metrics"]["well_formed_formula"] = float(formula_l1 is not None)
+        return result
 
 
 def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
