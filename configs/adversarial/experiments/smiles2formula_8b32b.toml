@@ -7,7 +7,7 @@ max_steps = 15000
 name = "Qwen/Qwen3-8B"
 
 [generator.wandb]
-project = "adversarial-experiments"
+project = "smiles2formula_v2"
 name = "smiles2formula-8bgen-32bjudge-b64r8-ipo-2nodes"
 
 [generator.trainer.loss]
