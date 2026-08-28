@@ -16,7 +16,7 @@ kl_tau = 0.005
 [generator.trainer.optim]
 lr = 5e-7
 
-[generator.trainer.weight_broadcast]
+[generator.weight_broadcast]
 type = "nccl"
 
 [generator.deployment]
@@ -40,7 +40,7 @@ name = "Qwen/Qwen3-32B"
 [judge.trainer.optim]
 lr = 1e-6
 
-[judge.trainer.weight_broadcast]
+[judge.weight_broadcast]
 type = "nccl"
 
 [judge.deployment]

@@ -5,14 +5,28 @@ from pydantic import Field, model_validator
 
 from prime_rl.configs.adversarial_orchestrator import OrchestratorConfig as AdversarialOrchestratorConfig
 from prime_rl.configs.inference import InferenceConfig
+from prime_rl.configs.inference import WeightBroadcastConfig as InferenceWeightBroadcastConfig
 from prime_rl.configs.monitors import WandbMonitorConfig
+from prime_rl.configs.orchestrator import (
+    FileSystemWeightBroadcastConfig as OrchestratorFileSystemWeightBroadcastConfig,
+)
+from prime_rl.configs.orchestrator import (
+    NCCLWeightBroadcastConfig as OrchestratorNCCLWeightBroadcastConfig,
+)
 from prime_rl.configs.rl import (
     DeploymentConfig,
     SharedLogConfig,
     SharedModelConfig,
+    SharedWeightBroadcastConfig,
     SingleNodeDeploymentConfig,
 )
 from prime_rl.configs.shared import TransportConfig
+from prime_rl.configs.trainer import (
+    FileSystemWeightBroadcastConfig as TrainerFileSystemWeightBroadcastConfig,
+)
+from prime_rl.configs.trainer import (
+    NCCLWeightBroadcastConfig as TrainerNCCLWeightBroadcastConfig,
+)
 from prime_rl.configs.trainer import TrainerConfig
 from prime_rl.utils.config import BaseConfig
 
@@ -52,6 +66,9 @@ class AdversarialRoleConfig(BaseConfig):
     wandb: WandbMonitorConfig | None = Field(
         None, description="Shared W&B run, propagated to trainer and orchestrator monitors."
     )
+    weight_broadcast: SharedWeightBroadcastConfig | None = Field(
+        None, description="Shared weight broadcast, propagated to trainer, orchestrator, and inference."
+    )
 
     @model_validator(mode="after")
     def resolve_shared_fields(self):
@@ -73,6 +90,35 @@ class AdversarialRoleConfig(BaseConfig):
         if self.wandb is not None:
             self.trainer.monitors.wandb = self.wandb.model_copy(deep=True)
             self.orchestrator.wandb = self.wandb.model_copy(deep=True)
+        return self
+
+    @model_validator(mode="after")
+    def resolve_weight_broadcast(self):
+        shared = self.weight_broadcast
+        if shared is None:
+            return self
+        if shared.type == "nccl":
+            inference_world_size = (
+                self.inference.vllm.data_parallel_size * self.inference.vllm.tensor_parallel_size
+                if self.inference is not None
+                else 1
+            )
+            common = dict(
+                host=shared.host,
+                port=shared.port,
+                timeout=shared.timeout,
+                inference_world_size=inference_world_size,
+                quantize_in_weight_transfer=shared.quantize_in_weight_transfer,
+            )
+            self.trainer.weight_broadcast = TrainerNCCLWeightBroadcastConfig(**common)
+            self.orchestrator.weight_broadcast = OrchestratorNCCLWeightBroadcastConfig(**common)
+        elif shared.type == "filesystem":
+            self.trainer.weight_broadcast = TrainerFileSystemWeightBroadcastConfig(timeout=shared.timeout)
+            self.orchestrator.weight_broadcast = OrchestratorFileSystemWeightBroadcastConfig(timeout=shared.timeout)
+        else:
+            raise ValueError("adversarial roles support filesystem or nccl weight broadcast.")
+        if self.inference is not None:
+            self.inference.weight_broadcast = InferenceWeightBroadcastConfig(type=shared.type)
         return self
 
     @model_validator(mode="after")
