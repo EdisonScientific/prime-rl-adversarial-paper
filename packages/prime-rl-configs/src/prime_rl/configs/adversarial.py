@@ -166,6 +166,13 @@ class AdversarialRLConfig(BaseConfig):
         False, description="Resume both roles from the latest step where each has a trainer checkpoint."
     )
     judge_update_gate: JudgeUpdateGateConfig = JudgeUpdateGateConfig()
+    judge_reference_repetition: bool = Field(
+        True,
+        description=(
+            "Keep the duplicate reference judge examples that balanced batches produce "
+            "(rollouts from one group share a reference). False dedupes them, shrinking the batch."
+        ),
+    )
     log: SharedLogConfig = SharedLogConfig()
 
     @model_validator(mode="after")
