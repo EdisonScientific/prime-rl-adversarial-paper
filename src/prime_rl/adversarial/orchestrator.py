@@ -1,5 +1,4 @@
 import asyncio
-import random
 import time
 from dataclasses import dataclass
 from statistics import correlation, fmean
@@ -100,8 +99,6 @@ def require_config(config: AdversarialRLConfig) -> None:
         raise ValueError(
             f"judge batch_size must be at most {max_judge_batch_size} for judge_objective={config.judge_objective}."
         )
-    if not pairwise and judge.batch_size % 2 != 0:
-        raise ValueError("judge batch_size must be even: it counts generated/reference pairs.")
     if bool(judge.train.env.args.get("pairwise")) != pairwise:
         raise ValueError("the judge env args must set pairwise = true exactly when judge_objective is pairwise.")
     if judge.group_size != 1:
@@ -418,29 +415,6 @@ async def rollouts_to_samples(runtime: RoleRuntime, rollouts: list[vf.RolloutOut
     return train_examples
 
 
-def build_judge_training_batch(
-    judge_rollouts: list[vf.RolloutOutput], config: AdversarialRLConfig, step: int
-) -> list[vf.RolloutOutput]:
-    """Sample generated judge calls without replacement up to half the judge batch,
-    then pair each with its reference call for balance. Rollouts from one group
-    share a reference prompt, so judge_reference_repetition = false dedupes those
-    repeats at the cost of a smaller, generated-heavy batch."""
-    rng = random.Random(step)
-    if config.judge_objective == "pairwise":
-        return rng.sample(judge_rollouts, min(len(judge_rollouts), config.judge.orchestrator.batch_size))
-    pairs = [(judge_rollouts[i], judge_rollouts[i + 1]) for i in range(0, len(judge_rollouts) - 1, 2)]
-    sampled = rng.sample(pairs, min(len(pairs), config.judge.orchestrator.batch_size // 2))
-    batch = []
-    seen_reference_prompts: set[str] = set()
-    for generated, reference in sampled:
-        batch.append(generated)
-        reference_prompt = str(reference.get("prompt"))
-        if config.judge_reference_repetition or reference_prompt not in seen_reference_prompts:
-            seen_reference_prompts.add(reference_prompt)
-            batch.append(reference)
-    return batch
-
-
 async def send_role_batch(runtime: RoleRuntime, rollouts: list[vf.RolloutOutput], group_size: int, step: int) -> None:
     if runtime.name == "judge":
         for rollout in rollouts:
@@ -613,8 +587,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             # starts at 1 and step N trains on rollouts/step_N, then broadcasts v_N.
             send_tasks = [send_role_batch(generator, generator_rollouts, group_size, generator.train_step + 1)]
             if not skip_judge_update:
-                judge_batch = build_judge_training_batch(scored.judge_rollouts, config, step)
-                send_tasks.append(send_role_batch(judge, judge_batch, 1, judge.train_step + 1))
+                send_tasks.append(send_role_batch(judge, scored.judge_rollouts, 1, judge.train_step + 1))
             await asyncio.gather(*send_tasks)
             step_path = get_step_path(get_rollout_dir(config.output_dir), step)
             await asyncio.gather(
