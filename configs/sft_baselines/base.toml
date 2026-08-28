@@ -11,7 +11,6 @@ keep_last = 2
 [model]
 attn = "flash_attention_2"
 optim_cpu_offload = false
-fused_lm_head_token_chunk_size = "disabled"
 
 [data]
 seq_len = 2048
