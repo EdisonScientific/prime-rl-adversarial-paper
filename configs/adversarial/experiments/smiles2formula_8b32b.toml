@@ -27,6 +27,9 @@ num_train_gpus = 7
 [generator.orchestrator]
 batch_size = 64
 
+[judge.orchestrator]
+batch_size = 128
+
 [generator.orchestrator.train.sampling]
 max_completion_tokens = 4096
 extra_body = { top_k = -1, min_p = 0.0, chat_template_kwargs = { enable_thinking = true } }
