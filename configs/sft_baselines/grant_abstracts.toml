@@ -1,7 +1,7 @@
 output_dir = "outputs/sft-baseline-grant-abstracts"
 
 [deployment]
-num_train_gpus = 6
+num_train_gpus = 4
 num_infer_gpus = 2
 
 [model]
