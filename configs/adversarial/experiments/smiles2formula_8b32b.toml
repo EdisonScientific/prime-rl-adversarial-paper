@@ -25,10 +25,10 @@ num_infer_gpus = 1
 num_train_gpus = 7
 
 [generator.orchestrator]
-batch_size = 512
+batch_size = 64
 
 [judge.orchestrator]
-batch_size = 1024
+batch_size = 128
 
 [generator.orchestrator.train.sampling]
 max_completion_tokens = 4096
