@@ -7,7 +7,7 @@ from datasets import Dataset
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
-from prime_rl.adversarial.utils import extract_answer
+from prime_rl.adversarial.utils import extract_answer, has_reasoning
 
 INTEGER_RE = re.compile(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)")
 
@@ -55,6 +55,8 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
         )
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
+        if not has_reasoning(completion):
+            return None
         answer = extract_answer(completion)
         if answer is None or not INTEGER_RE.fullmatch(answer.strip()):
             return None

@@ -57,6 +57,13 @@ def split_think(completion: Any) -> tuple[str, str]:
     return reasoning.removeprefix("<think>").strip(), rest
 
 
+def has_reasoning(completion: Any) -> bool:
+    """Whether the completion carries a non-empty reasoning block. The reasoning
+    envs require this for format_ok, like the legacy strict-think extractors."""
+    reasoning, _ = split_think(completion)
+    return bool(reasoning)
+
+
 def extract_answer(completion: Any) -> str | None:
     """The ``<answer>...</answer>`` payload, or None when the completion (after an
     optional reasoning block) is not exactly one answer block."""

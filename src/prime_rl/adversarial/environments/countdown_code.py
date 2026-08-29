@@ -9,7 +9,7 @@ from datasets import Dataset, load_dataset
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
-from prime_rl.adversarial.utils import split_think
+from prime_rl.adversarial.utils import has_reasoning, split_think
 
 COUNTDOWN_CODE_SYSTEM_PROMPT = """\
 You are a helpful coding assistant. Solve the task and return only the requested JSON.
@@ -97,13 +97,15 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
         return f"Numbers: {[int(number) for number in info['numbers']]}\nTarget: {int(info['target'])}"
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
+        if not has_reasoning(completion):
+            return None
         files = countdown_load_json_from_response(completion)
         if files is None:
             return None
         return json.dumps(files, sort_keys=True)
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
-        files = countdown_load_json_from_response(completion)
+        files = countdown_load_json_from_response(completion) if has_reasoning(completion) else None
         candidate = None if files is None else json.dumps(files, sort_keys=True)
         verifiable = 0.0
         if files is not None and files["solution.py"].strip():
