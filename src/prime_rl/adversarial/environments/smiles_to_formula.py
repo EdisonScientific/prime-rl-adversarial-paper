@@ -7,7 +7,7 @@ from datasets import Dataset, load_dataset
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
-from prime_rl.adversarial.utils import extract_answer, has_reasoning
+from prime_rl.adversarial.utils import extract_answer
 
 FORMULA_RE = re.compile(r"([A-Z][a-z]?)(\d*)")
 
@@ -42,6 +42,7 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
         dataset_path: str,
         num_examples: int | None = None,
         num_eval_examples: int | None = None,
+        require_reasoning: bool = True,
         **_: Any,
     ):
         source = load_dataset("parquet", data_dir=f"{dataset_path}/data")
@@ -55,10 +56,11 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
             dataset=Dataset.from_list(rows(source["train"], num_examples)),
             eval_dataset=Dataset.from_list(eval_rows) if eval_rows else None,
             system_prompt=ETHER0_SMILES_TO_FORMULA_SYSTEM_PROMPT,
+            require_reasoning=require_reasoning,
         )
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
-        if not has_reasoning(completion):
+        if not self.reasoning_ok(completion):
             return None
         return extract_answer(completion) or None
 

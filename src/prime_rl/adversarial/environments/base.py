@@ -2,7 +2,7 @@ from typing import Any
 
 import verifiers as vf
 
-from prime_rl.adversarial.utils import extract_answer
+from prime_rl.adversarial.utils import extract_answer, has_reasoning
 
 
 def make_example(example_id: int, question: str, answer: str, info: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -39,9 +39,14 @@ class GeneratorEnv(vf.SingleTurnEnv):
     judge_task_label = "Task"
     judge_candidate_label = "Candidate answer"
 
-    def __init__(self, **kwargs: Any):
+    def __init__(self, require_reasoning: bool = True, **kwargs: Any):
+        self.require_reasoning = require_reasoning
         kwargs.setdefault("rubric", vf.Rubric(funcs=[self.placeholder_reward]))
         super().__init__(**kwargs)
+
+    def reasoning_ok(self, completion: Any) -> bool:
+        """Format gate on the reasoning block, toggled by the require_reasoning env arg."""
+        return not self.require_reasoning or has_reasoning(completion)
 
     # The plural ``completions`` signature marks this as a group reward func, which
     # routes generator envs through ``Env.run_group`` (one call per GRPO group).
@@ -71,6 +76,8 @@ class GeneratorEnv(vf.SingleTurnEnv):
 
     def adversarial_candidate_answer(self, completion: Any) -> Any:
         # Raw answer text: the judge sees exactly what the generator wrote.
+        if not self.reasoning_ok(completion):
+            return None
         return extract_answer(completion)
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:

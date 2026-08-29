@@ -52,7 +52,9 @@ class PaperAbstractGeneratorEnv(GeneratorEnv):
     judge_task_label = "Abstract-writing task"
     judge_candidate_label = "Candidate abstract"
 
-    def __init__(self, dataset_path: str, num_examples: int = 10_000, seed: int = 0, **_: Any):
+    def __init__(
+        self, dataset_path: str, num_examples: int = 10_000, seed: int = 0, require_reasoning: bool = True, **_: Any
+    ):
         records = load_prepared_records(dataset_path, num_examples, seed)
         super().__init__(
             dataset=Dataset.from_list(
@@ -62,6 +64,7 @@ class PaperAbstractGeneratorEnv(GeneratorEnv):
                 ]
             ),
             system_prompt=PAPER_ABSTRACT_GENERATOR_SYSTEM_PROMPT,
+            require_reasoning=require_reasoning,
         )
 
 
@@ -72,7 +75,9 @@ class GrantAbstractGeneratorEnv(GeneratorEnv):
     judge_task_label = "Abstract-writing task"
     judge_candidate_label = "Candidate abstract"
 
-    def __init__(self, dataset_path: str, num_examples: int = 10_000, seed: int = 0, **_: Any):
+    def __init__(
+        self, dataset_path: str, num_examples: int = 10_000, seed: int = 0, require_reasoning: bool = True, **_: Any
+    ):
         records = load_prepared_records(dataset_path, num_examples, seed)
         super().__init__(
             dataset=Dataset.from_list(
@@ -86,6 +91,7 @@ class GrantAbstractGeneratorEnv(GeneratorEnv):
                 ]
             ),
             system_prompt=GRANT_ABSTRACT_GENERATOR_SYSTEM_PROMPT,
+            require_reasoning=require_reasoning,
         )
 
 

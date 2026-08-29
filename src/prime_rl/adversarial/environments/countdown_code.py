@@ -9,7 +9,7 @@ from datasets import Dataset, load_dataset
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
-from prime_rl.adversarial.utils import has_reasoning, split_think
+from prime_rl.adversarial.utils import split_think
 
 COUNTDOWN_CODE_SYSTEM_PROMPT = """\
 You are a helpful coding assistant. Solve the task and return only the requested JSON.
@@ -69,6 +69,7 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
         dataset_path: str,
         num_examples: int | None = None,
         num_eval_examples: int | None = None,
+        require_reasoning: bool = True,
         **_: Any,
     ):
         source = load_dataset("parquet", data_dir=f"{dataset_path}/data")
@@ -90,6 +91,7 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
             dataset=Dataset.from_list(rows(source["train"], num_examples)),
             eval_dataset=Dataset.from_list(eval_rows) if eval_rows else None,
             system_prompt=COUNTDOWN_CODE_SYSTEM_PROMPT,
+            require_reasoning=require_reasoning,
         )
 
     def adversarial_question(self, example: dict[str, Any]) -> str:
@@ -97,7 +99,7 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
         return f"Numbers: {[int(number) for number in info['numbers']]}\nTarget: {int(info['target'])}"
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
-        if not has_reasoning(completion):
+        if not self.reasoning_ok(completion):
             return None
         files = countdown_load_json_from_response(completion)
         if files is None:
@@ -105,7 +107,7 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
         return json.dumps(files, sort_keys=True)
 
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
-        files = countdown_load_json_from_response(completion) if has_reasoning(completion) else None
+        files = countdown_load_json_from_response(completion) if self.reasoning_ok(completion) else None
         candidate = None if files is None else json.dumps(files, sort_keys=True)
         verifiable = 0.0
         if files is not None and files["solution.py"].strip():

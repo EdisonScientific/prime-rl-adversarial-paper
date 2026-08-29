@@ -7,7 +7,7 @@ from datasets import Dataset
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
-from prime_rl.adversarial.utils import extract_answer, has_reasoning
+from prime_rl.adversarial.utils import extract_answer
 
 INTEGER_RE = re.compile(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)")
 
@@ -35,6 +35,7 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
         num_examples: int = 10_000,
         num_eval_examples: int | None = None,
         seed: int = 0,
+        require_reasoning: bool = True,
         **_: Any,
     ):
         total = num_examples + (num_eval_examples or 0)
@@ -52,10 +53,11 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
             dataset=dataset.select(range(num_examples)),
             eval_dataset=dataset.select(range(num_examples, total)) if num_eval_examples else None,
             system_prompt=MULTIPLICATION_GENERATOR_SYSTEM_PROMPT,
+            require_reasoning=require_reasoning,
         )
 
     def adversarial_candidate_answer(self, completion: Any) -> str | None:
-        if not has_reasoning(completion):
+        if not self.reasoning_ok(completion):
             return None
         answer = extract_answer(completion)
         if answer is None or not INTEGER_RE.fullmatch(answer.strip()):
