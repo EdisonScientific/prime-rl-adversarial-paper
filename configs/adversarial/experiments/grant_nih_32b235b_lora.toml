@@ -42,6 +42,9 @@ extra_body = { top_k = -1, min_p = 0.0, chat_template_kwargs = { enable_thinking
 [generator.inference.vllm]
 tensor_parallel_size = 4
 max_model_len = 8192
+# Auto-detection leaves hybrid Qwen3 models parserless, but thinking_token_budget
+# requires the server to track the reasoning block.
+reasoning_parser = "qwen3"
 
 [judge]
 max_steps = 15000
