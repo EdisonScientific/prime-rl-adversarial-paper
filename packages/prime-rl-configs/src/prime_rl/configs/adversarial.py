@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -69,6 +69,21 @@ class AdversarialRoleConfig(BaseConfig):
     weight_broadcast: SharedWeightBroadcastConfig | None = Field(
         None, description="Shared weight broadcast, propagated to trainer, orchestrator, and inference."
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_stale_deployment_variant_keys(cls, data: Any) -> Any:
+        """Layered configs can switch the deployment type but cannot delete the
+        previous variant's keys, so drop the keys the selected variant rejects."""
+        deployment = data.get("deployment") if isinstance(data, dict) else None
+        if isinstance(deployment, dict):
+            variant_only_keys = {
+                "single_node": ("num_train_nodes", "num_infer_nodes", "num_infer_replicas", "nodes_per_fsdp_group"),
+                "multi_node": ("num_train_gpus", "num_infer_gpus"),
+            }
+            for key in variant_only_keys.get(deployment.get("type"), ()):
+                deployment.pop(key, None)
+        return data
 
     @model_validator(mode="after")
     def resolve_shared_fields(self):
