@@ -24,6 +24,15 @@ placeholders, or multiple abstracts.
 Stop immediately after the closing answer tag.
 """
 
+DESLOPIFY_GENERATOR_SYSTEM_PROMPT = """\
+You are rewriting an AI-rephrased research paper abstract so it reads as human-written.
+
+Open with <answer>, write the complete rewritten abstract, then close with </answer>.
+
+Preserve all of the information and change only wording and style.
+Stop immediately after the closing answer tag.
+"""
+
 GRANT_ABSTRACT_QUESTION = "Write the abstract for an NIH grant proposal with the following title.\n{title}"
 
 GRANT_ABSTRACT_GENERATOR_SYSTEM_PROMPT = """\
@@ -61,6 +70,32 @@ def hf_grant_examples(hf_dataset: str, split: str, num_examples: int | None = No
             raise ValueError(f"{hf_dataset} row {idx} completion is not a single answer block.")
         examples.append(make_example(idx, question, match.group(1).strip()))
     return examples
+
+
+def hf_question_answer_examples(hf_dataset: str, split: str, num_examples: int | None = None) -> list[dict[str, Any]]:
+    """Examples from a hub dataset whose rows already carry the full generator
+    question and the reference answer as plain-text columns."""
+    rows = load_dataset(hf_dataset, split=split)
+    if num_examples is not None:
+        rows = rows.select(range(min(num_examples, len(rows))))
+    return [make_example(idx, row["question"], row["answer"]) for idx, row in enumerate(rows)]
+
+
+class DeslopifyAbstractGeneratorEnv(GeneratorEnv):
+    """Rewrite-conditioned generation: the generator sees an AI rephrasing of a
+    human-written abstract and must produce text indistinguishable from the
+    original, which serves as the reference the judge compares against."""
+
+    judge_task_label = "Abstract-restoration task"
+    judge_candidate_label = "Candidate abstract"
+
+    def __init__(self, hf_dataset: str, num_examples: int | None = None, require_reasoning: bool = True, **_: Any):
+        super().__init__(
+            dataset=Dataset.from_list(hf_question_answer_examples(hf_dataset, "train", num_examples)),
+            eval_dataset=Dataset.from_list(hf_question_answer_examples(hf_dataset, "validation")),
+            system_prompt=DESLOPIFY_GENERATOR_SYSTEM_PROMPT,
+            require_reasoning=require_reasoning,
+        )
 
 
 class PaperAbstractGeneratorEnv(GeneratorEnv):
@@ -134,6 +169,14 @@ def load_paper_environment(kind: str = "generator", **kwargs: Any) -> vf.Environ
     if kind == "judge":
         return BinaryJudgeEnv(**kwargs)
     raise ValueError("paper_abstract adversarial env kind must be generator or judge.")
+
+
+def load_deslopify_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:
+    if kind == "generator":
+        return DeslopifyAbstractGeneratorEnv(**kwargs)
+    if kind == "judge":
+        return BinaryJudgeEnv(**kwargs)
+    raise ValueError("deslopify_abstract adversarial env kind must be generator or judge.")
 
 
 def load_grant_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:

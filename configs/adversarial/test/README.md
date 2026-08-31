@@ -7,9 +7,10 @@ earlier keys; nested tables merge recursively):
   (Qwen3-0.6B generator, Qwen3-1.7B judge, 3000 steps, batch 128, 8 rollouts
   per example, judge gate at 0.75, filesystem weight broadcast).
 - env overlays — `multiplication.toml`, `countdown_code.toml`,
-  `smiles_to_formula.toml`, `grant_abstract.toml`, `paper_abstract.toml`:
-  dataset args, run names, and (where the env has an eval split) the eval
-  block. Grant and paper abstracts share one env module (`abstracts.py`).
+  `smiles_to_formula.toml`, `grant_abstract.toml`, `paper_abstract.toml`,
+  `deslopify_abstract.toml`: dataset args, run names, and (where the env has
+  an eval split) the eval block. The abstract envs share one env module
+  (`abstracts.py`).
 - feature overlays — `pairwise.toml` (pairwise judging on ports 8002/8003),
   `lora.toml` (rank-16 LoRA on both roles, 100x LR), `short.toml` (100 steps).
 

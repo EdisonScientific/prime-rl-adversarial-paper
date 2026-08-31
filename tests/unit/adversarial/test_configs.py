@@ -7,7 +7,7 @@ from prime_rl.utils.config import cli
 
 CONFIG_DIR = Path("configs/adversarial/test")
 EXPERIMENT_DIR = Path("configs/adversarial/experiments")
-ENVS = ["multiplication", "countdown_code", "smiles_to_formula", "grant_abstract", "paper_abstract"]
+ENVS = ["multiplication", "countdown_code", "smiles_to_formula", "grant_abstract", "paper_abstract", "deslopify_abstract"]
 OVERLAYS = [[], ["pairwise"], ["lora"], ["short"], ["8b14b"], ["pairwise", "lora", "short"]]
 EXPERIMENTS = [
     ("smiles_to_formula", ["smiles2formula_8b32b"]),
