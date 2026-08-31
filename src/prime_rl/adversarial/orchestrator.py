@@ -59,6 +59,7 @@ class RoleRuntime:
 
 @dataclass
 class ScoredBatch:
+    generator_groups: list[list[vf.RolloutOutput]]
     judge_rollouts: list[vf.RolloutOutput]
     generator_rewards: list[float]
 
@@ -287,11 +288,15 @@ async def score_and_build_judge_batch(
     judge: RoleRuntime,
     *,
     step: int,
-    generator_groups: list[list[vf.RolloutOutput]],
+    generator_group_tasks: list[asyncio.Task[list[vf.RolloutOutput]]],
     examples: list[dict[str, Any]],
     reward_mode: str,
     judge_objective: str,
 ) -> ScoredBatch:
+    """Judging is pipelined into generation: each group's judge calls dispatch as
+    soon as that group finishes generating, so judge prefill overlaps the still
+    running generation instead of serializing after it."""
+    generator_groups: list[list[vf.RolloutOutput]] = []
     judge_tasks: list[asyncio.Task[vf.RolloutOutput]] = []
     scored_positions: list[tuple[vf.RolloutOutput, dict[str, Any], float, int]] = []
     generator_rewards: list[float] = []
@@ -309,7 +314,9 @@ async def score_and_build_judge_batch(
         rollout["metrics"].update(metrics)
         generator_rewards.append(reward)
 
-    for group_idx, (example, rollouts) in enumerate(zip(examples, generator_groups)):
+    for group_idx, (example, group_task) in enumerate(zip(examples, generator_group_tasks)):
+        rollouts = await group_task
+        generator_groups.append(rollouts)
         question = generator_env.adversarial_question(example)
         reference = generator_env.adversarial_reference_answer(example)
         for rollout_idx, rollout in enumerate(rollouts):
@@ -373,6 +380,7 @@ async def score_and_build_judge_batch(
         )
 
     return ScoredBatch(
+        generator_groups=generator_groups,
         judge_rollouts=list(judge_rollouts),
         generator_rewards=generator_rewards,
     )
@@ -544,22 +552,22 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             step_start = time.perf_counter()
             offset = step * groups_per_step
             batch_examples = [dict(examples[(offset + idx) % len(examples)]) for idx in range(groups_per_step)]
-            generator_groups = await asyncio.gather(
-                *(
+            generator_group_tasks = [
+                asyncio.create_task(
                     run_generator_group(generator, example, group_size, cache_salt=str(generator.ckpt_step))
-                    for example in batch_examples
                 )
-            )
-            generator_rollouts = [rollout for group in generator_groups for rollout in group]
+                for example in batch_examples
+            ]
             scored = await score_and_build_judge_batch(
                 generator.env,
                 judge,
                 step=step,
-                generator_groups=generator_groups,
+                generator_group_tasks=generator_group_tasks,
                 examples=batch_examples,
                 reward_mode=config.generator_reward_mode,
                 judge_objective=config.judge_objective,
             )
+            generator_rollouts = [rollout for group in scored.generator_groups for rollout in group]
 
             generator_metrics: dict[str, list[float]] = {}
             for rollout in generator_rollouts:

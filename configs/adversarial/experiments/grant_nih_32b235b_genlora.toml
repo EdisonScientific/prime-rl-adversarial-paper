@@ -72,6 +72,8 @@ num_infer_nodes = 1
 batch_size = 2048
 
 [judge.inference.vllm]
+# Judge steps are prefill-heavy (~3M tokens); bigger chunked-prefill bites cut the tail.
+max_num_batched_tokens = 32768
 # TP-4: at TP-8 the expert intermediate size shards below the CUTLASS MoE
 # kernel's 128-multiple requirement (the LoRA-judge variant dodges that kernel).
 tensor_parallel_size = 4

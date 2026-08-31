@@ -75,5 +75,7 @@ num_infer_nodes = 1
 batch_size = 2048
 
 [judge.inference.vllm]
+# Judge steps are prefill-heavy (~3M tokens); bigger chunked-prefill bites cut the tail.
+max_num_batched_tokens = 32768
 tensor_parallel_size = 8
 max_model_len = 4096
