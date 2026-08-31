@@ -23,6 +23,11 @@ rank = 32
 [generator.trainer.optim]
 lr = 3e-6
 
+[generator.weight_broadcast]
+type = "filesystem"
+# Cold model loads can exceed the default 1200s handshake window.
+timeout = 3600
+
 [generator.deployment]
 type = "multi_node"
 gpus_per_node = 8
@@ -61,6 +66,8 @@ lr = 3e-7
 
 [judge.weight_broadcast]
 type = "nccl"
+# Cold model loads can exceed the default 1200s handshake window.
+timeout = 3600
 
 [judge.deployment]
 type = "multi_node"
