@@ -1,0 +1,31 @@
+output_dir = "outputs/adversarial-smiles2formula-8bgen-exact"
+generator_reward_mode = "exact_only"
+
+# Freeze the judge: the gate skips every update and nothing ever forces one,
+# so the 0.6B judge only provides (ignored) scoring metrics.
+[judge_update_gate]
+accuracy_threshold = 0.0
+max_skip_streak = "None"
+
+[generator.wandb]
+name = "smiles2formula-8bgen-exact-b64r8-ipo-1node"
+
+[generator.deployment]
+gpus_per_node = 8
+num_infer_gpus = 2
+num_train_gpus = 4
+
+[generator.inference.vllm]
+tensor_parallel_size = 2
+
+[judge.model]
+name = "Qwen/Qwen3-0.6B"
+
+[judge.deployment]
+gpus_per_node = 8
+num_infer_gpus = 1
+num_train_gpus = 1
+
+[judge.inference.vllm]
+tensor_parallel_size = 1
+max_model_len = 2048
