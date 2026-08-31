@@ -62,6 +62,9 @@ class ScoredBatch:
     generator_groups: list[list[vf.RolloutOutput]]
     judge_rollouts: list[vf.RolloutOutput]
     generator_rewards: list[float]
+    generation_seconds: float
+    judge_tail_seconds: float
+    """Judge scoring time left over after the last generation finished."""
 
 
 @dataclass
@@ -296,6 +299,7 @@ async def score_and_build_judge_batch(
     """Judging is pipelined into generation: each group's judge calls dispatch as
     soon as that group finishes generating, so judge prefill overlaps the still
     running generation instead of serializing after it."""
+    phase_start = time.perf_counter()
     generator_groups: list[list[vf.RolloutOutput]] = []
     judge_tasks: list[asyncio.Task[vf.RolloutOutput]] = []
     scored_positions: list[tuple[vf.RolloutOutput, dict[str, Any], float, int]] = []
@@ -358,7 +362,9 @@ async def score_and_build_judge_batch(
                     )
                 )
 
+    generation_seconds = time.perf_counter() - phase_start
     judge_rollouts = await asyncio.gather(*judge_tasks) if judge_tasks else []
+    judge_tail_seconds = time.perf_counter() - phase_start - generation_seconds
     judge_env = judge.env
 
     for rollout, result, first_label, task_idx in scored_positions:
@@ -383,6 +389,8 @@ async def score_and_build_judge_batch(
         generator_groups=generator_groups,
         judge_rollouts=list(judge_rollouts),
         generator_rewards=generator_rewards,
+        generation_seconds=generation_seconds,
+        judge_tail_seconds=judge_tail_seconds,
     )
 
 
@@ -621,6 +629,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 "train/judge/num_output_tokens/max": max(judge_completion_lens, default=0.0),
                 "train/judge/update_skipped": float(skip_judge_update),
                 "time/step": time.perf_counter() - step_start,
+                "time/generation": scored.generation_seconds,
+                "time/judge_tail": scored.judge_tail_seconds,
             }
             for key, values in generator_metrics.items():
                 log_values[f"train/generator/metrics/{key}/mean"] = fmean(values)
