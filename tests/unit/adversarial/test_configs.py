@@ -12,6 +12,7 @@ OVERLAYS = [[], ["pairwise"], ["lora"], ["short"], ["8b14b"], ["pairwise", "lora
 EXPERIMENTS = [
     ("smiles_to_formula", ["smiles2formula_8b32b"]),
     ("smiles_to_formula", ["smiles2formula_8b32b", "smiles2formula_8b32b_lora"]),
+    ("grant_abstract", ["grant_nih_32b235b_lora"]),
 ]
 
 

@@ -1,10 +1,11 @@
 import json
 import os
 import random
+import re
 from typing import Any
 
 import verifiers as vf
-from datasets import Dataset
+from datasets import Dataset, load_dataset
 
 from prime_rl.adversarial.environments.base import GeneratorEnv, make_example
 from prime_rl.adversarial.environments.judge import BinaryJudgeEnv
@@ -45,6 +46,23 @@ def load_prepared_records(dataset_path: str, num_examples: int, seed: int) -> li
     return records[:num_examples]
 
 
+def hf_grant_examples(hf_dataset: str, split: str, num_examples: int | None = None) -> list[dict[str, Any]]:
+    """Examples from an SFT-format hub dataset: the prompt is the title-conditioned
+    question and the completion wraps the reference abstract in answer tags."""
+    rows = load_dataset(hf_dataset, split=split)
+    if num_examples is not None:
+        rows = rows.select(range(min(num_examples, len(rows))))
+    examples = []
+    for idx, row in enumerate(rows):
+        question = row["prompt"][0]["content"]
+        completion = row["completion"][0]["content"]
+        match = re.fullmatch(r"\s*<answer>(.*)</answer>\s*", completion, re.DOTALL)
+        if match is None:
+            raise ValueError(f"{hf_dataset} row {idx} completion is not a single answer block.")
+        examples.append(make_example(idx, question, match.group(1).strip()))
+    return examples
+
+
 class PaperAbstractGeneratorEnv(GeneratorEnv):
     """Unconditional corpus generation: every example shares one fixed instruction,
     so the judge discriminates generated abstracts from corpus samples."""
@@ -76,20 +94,35 @@ class GrantAbstractGeneratorEnv(GeneratorEnv):
     judge_candidate_label = "Candidate abstract"
 
     def __init__(
-        self, dataset_path: str, num_examples: int = 10_000, seed: int = 0, require_reasoning: bool = True, **_: Any
+        self,
+        dataset_path: str | None = None,
+        hf_dataset: str | None = None,
+        num_examples: int = 10_000,
+        seed: int = 0,
+        require_reasoning: bool = True,
+        **_: Any,
     ):
-        records = load_prepared_records(dataset_path, num_examples, seed)
+        # hf_dataset wins when both are set: layered configs can override the
+        # base layer's dataset_path without being able to delete the key.
+        if hf_dataset is not None:
+            examples = hf_grant_examples(hf_dataset, "train", num_examples)
+            eval_examples = hf_grant_examples(hf_dataset, "validation")
+        elif dataset_path is not None:
+            records = load_prepared_records(dataset_path, num_examples, seed)
+            examples = [
+                make_example(
+                    idx,
+                    GRANT_ABSTRACT_QUESTION.format(title=record["title"].strip()),
+                    record["abstract"].strip(),
+                )
+                for idx, record in enumerate(records)
+            ]
+            eval_examples = []
+        else:
+            raise ValueError("grant_abstract requires dataset_path or hf_dataset.")
         super().__init__(
-            dataset=Dataset.from_list(
-                [
-                    make_example(
-                        idx,
-                        GRANT_ABSTRACT_QUESTION.format(title=record["title"].strip()),
-                        record["abstract"].strip(),
-                    )
-                    for idx, record in enumerate(records)
-                ]
-            ),
+            dataset=Dataset.from_list(examples),
+            eval_dataset=Dataset.from_list(eval_examples) if eval_examples else None,
             system_prompt=GRANT_ABSTRACT_GENERATOR_SYSTEM_PROMPT,
             require_reasoning=require_reasoning,
         )
