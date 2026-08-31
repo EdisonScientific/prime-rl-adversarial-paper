@@ -39,6 +39,11 @@ broadcast to replica engines have not been smoke-verified.
 - `thinking_token_budget` requires the serving engine to run with a reasoning
   parser (`reasoning_parser = "qwen3"` for hybrid Qwen3 models, which parser
   auto-detection leaves unset).
+- Cold model loads read from Lustre at ~200MB/s (the 235B judge takes ~27
+  minutes on a node that has not served it before; warm page cache cuts that
+  to ~11). Boot cost is negligible for long runs; for rapid restart loops,
+  pre-stage weights to node-local disk and point ``model.name`` at the local
+  path, as the legacy runs did with ``/tmp/qwen3-32b-hf``.
 - Generation dominates step time; the fast layout gives the generator a
   dedicated TP-8 inference node and a `max_model_len` just above
   prompt + completion so the KV cache holds more concurrent sequences.
