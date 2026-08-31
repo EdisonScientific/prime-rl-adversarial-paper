@@ -52,6 +52,9 @@ name = "Qwen/Qwen3-235B-A22B"
 
 [judge.trainer.model.lora]
 rank = 32
+# Attention only: expert-covering adapters on the 235B MoE are multi-GB and
+# time out (or fail) in vLLM's adapter loading.
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
 [judge.trainer.optim]
 lr = 3e-6
