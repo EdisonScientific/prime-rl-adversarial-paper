@@ -187,9 +187,14 @@ class AdversarialRLConfig(BaseConfig):
     def resolve_nested_runs(self):
         for run in (self.generator, self.judge):
             if run.deployment.type == "multi_node":
-                expected_infer_nodes = int(run.inference is not None)
-                if run.deployment.total_infer_nodes != expected_infer_nodes:
-                    raise ValueError("adversarial-rl multi_node roles support at most one inference node per role.")
+                if run.inference is None:
+                    if run.deployment.total_infer_nodes != 0:
+                        raise ValueError("adversarial-rl multi_node roles without inference must use zero infer nodes.")
+                    continue
+                if run.deployment.num_infer_nodes != 1:
+                    raise ValueError("adversarial-rl inference replicas are one node each; scale num_infer_replicas.")
+                if run.deployment.num_infer_replicas > 1 and run.trainer.weight_broadcast.type != "filesystem":
+                    raise ValueError("adversarial-rl inference replicas require filesystem weight broadcast.")
             elif run.deployment.type != "single_node":
                 raise ValueError("adversarial-rl supports single_node or one-train-one-infer multi_node roles.")
         if self.generator.orchestrator.batch_size is None or self.judge.orchestrator.batch_size is None:

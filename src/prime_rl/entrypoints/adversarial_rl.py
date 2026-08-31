@@ -32,6 +32,7 @@ from prime_rl.utils.process import cleanup_processes, cleanup_threads, monitor_p
 from prime_rl.utils.utils import get_free_port
 
 ADVERSARIAL_TOML = "adversarial.toml"
+ENGINE_CONFIG = "engine.json"
 GENERATOR = "generator"
 JUDGE = "judge"
 
@@ -62,8 +63,9 @@ def allocate_gpus(config: AdversarialRLConfig) -> dict[str, dict[str, Any]]:
         cursor = 0
         for role, run in ((GENERATOR, config.generator), (JUDGE, config.judge)):
             if run.deployment.type == "multi_node":
-                inference_node = nodes[cursor] if run.inference is not None else None
-                cursor += run.deployment.total_infer_nodes
+                infer_node_count = run.deployment.total_infer_nodes if run.inference is not None else 0
+                inference_nodes = nodes[cursor : cursor + infer_node_count]
+                cursor += infer_node_count
                 trainer_nodes = nodes[cursor : cursor + run.deployment.num_train_nodes]
                 cursor += run.deployment.num_train_nodes
                 inference_gpus = visible
@@ -77,12 +79,12 @@ def allocate_gpus(config: AdversarialRLConfig) -> dict[str, dict[str, Any]]:
                     )
                 node = nodes[cursor]
                 cursor += 1
-                inference_node = node if run.inference is not None else None
+                inference_nodes = [node] if run.inference is not None else []
                 trainer_nodes = [node]
                 inference_gpus = visible[:num_infer_gpus]
                 trainer_gpus = visible[num_infer_gpus:required_gpus]
             out[role] = {
-                "inference_node": inference_node,
+                "inference_nodes": inference_nodes,
                 "trainer_nodes": trainer_nodes,
                 "inference": inference_gpus,
                 "trainer": trainer_gpus,
@@ -105,13 +107,13 @@ def allocate_gpus(config: AdversarialRLConfig) -> dict[str, dict[str, Any]]:
             )
         return {
             GENERATOR: {
-                "inference_node": nodes[0],
+                "inference_nodes": [nodes[0]],
                 "trainer_nodes": [nodes[0]],
                 "inference": visible[: counts[GENERATOR]["inference"]],
                 "trainer": visible[counts[GENERATOR]["inference"] : generator_required],
             },
             JUDGE: {
-                "inference_node": nodes[1],
+                "inference_nodes": [nodes[1]],
                 "trainer_nodes": [nodes[1]],
                 "inference": visible[: counts[JUDGE]["inference"]],
                 "trainer": visible[counts[JUDGE]["inference"] : judge_required],
@@ -134,16 +136,22 @@ def allocate_gpus(config: AdversarialRLConfig) -> dict[str, dict[str, Any]]:
         cursor += infer_count
         train = visible[cursor : cursor + train_count]
         cursor += train_count
-        out[role] = {"inference_node": None, "trainer_nodes": [], "inference": infer, "trainer": train}
+        out[role] = {"inference_nodes": [], "trainer_nodes": [], "inference": infer, "trainer": train}
     return out
 
 
 def apply_role_hosts(config: AdversarialRLConfig, allocation: dict[str, dict[str, Any]]) -> None:
     for role, run in ((GENERATOR, config.generator), (JUDGE, config.judge)):
-        inference_node = allocation[role]["inference_node"]
+        inference_nodes = allocation[role]["inference_nodes"]
         if run.inference is not None:
-            host = inference_node or "localhost"
+            host = inference_nodes[0] if inference_nodes else "localhost"
             run.orchestrator.client.base_url = f"http://{host}:{run.inference.server.port}/v1"
+            if len(inference_nodes) > 1:
+                # Admin ops must reach every replica engine directly; the router
+                # only forwards the data plane.
+                run.orchestrator.client.admin_base_url = [
+                    f"http://{node}:{run.inference.backend_port}/v1" for node in inference_nodes
+                ]
 
         trainer_nodes = allocation[role]["trainer_nodes"]
         if run.trainer.weight_broadcast.type == "nccl":
@@ -165,6 +173,14 @@ def write_configs(config: AdversarialRLConfig, config_dir: Path) -> None:
         if role_config.inference is not None:
             with open(role_dir / INFERENCE_CONFIG, "w") as f:
                 json.dump(dump_resolved_config(role_config.inference, exclude=INFERENCE_CONFIG_EXCLUDE), f, indent=2)
+            if role_config.deployment.type == "multi_node" and role_config.deployment.total_infer_nodes > 1:
+                # Replica engines run bare on backend_port; a shared router on
+                # server.port load-balances across them.
+                engine = role_config.inference.model_copy(deep=True)
+                engine.router = None
+                engine.server.port = engine.backend_port
+                with open(role_dir / ENGINE_CONFIG, "w") as f:
+                    json.dump(dump_resolved_config(engine, exclude=INFERENCE_CONFIG_EXCLUDE), f, indent=2)
 
 
 def start_process(cmd: list[str], log_path: Path, env: dict[str, str], node: str | list[str] | None = None) -> Popen:
@@ -263,14 +279,54 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
         monitor_threads.append(thread)
 
     try:
-        for role in (GENERATOR, JUDGE):
+        for role, run in ((GENERATOR, config.generator), (JUDGE, config.judge)):
             inference_config = config_dir / role / INFERENCE_CONFIG
-            if inference_config.exists():
+            if not inference_config.exists():
+                continue
+            inference_nodes = allocation[role]["inference_nodes"]
+            inference_gpus = {"CUDA_VISIBLE_DEVICES": ",".join(map(str, allocation[role]["inference"]))}
+            if len(inference_nodes) > 1:
+                engine_config = config_dir / role / ENGINE_CONFIG
+                for replica, node in enumerate(inference_nodes):
+                    engine = start_process(
+                        ["inference", "@", engine_config.as_posix()],
+                        log_dir / f"{role}_engine{replica}.log",
+                        inference_gpus,
+                        node,
+                    )
+                    processes.append(engine)
+                    monitor(f"{role}_engine{replica}", engine)
+                assert run.inference is not None and run.inference.router is not None
+                router = start_process(
+                    [
+                        "vllm-router",
+                        "--policy",
+                        run.inference.router.policy,
+                        "--host",
+                        "0.0.0.0",
+                        "--port",
+                        str(run.inference.server.port),
+                        "--worker-urls",
+                        *[f"http://{node}:{run.inference.backend_port}" for node in inference_nodes],
+                        "--request-id-headers",
+                        "x-session-id",
+                        "--worker-startup-timeout-secs",
+                        "4200",
+                        "--prometheus-port",
+                        str(run.inference.server.port + 21000),
+                    ],
+                    log_dir / f"{role}_router.log",
+                    {},
+                    inference_nodes[0],
+                )
+                processes.append(router)
+                monitor(f"{role}_router", router)
+            else:
                 inference = start_process(
                     ["inference", "@", inference_config.as_posix()],
                     log_dir / f"{role}_inference.log",
-                    {"CUDA_VISIBLE_DEVICES": ",".join(map(str, allocation[role]["inference"]))},
-                    allocation[role]["inference_node"],
+                    inference_gpus,
+                    inference_nodes[0] if inference_nodes else None,
                 )
                 processes.append(inference)
                 monitor(f"{role}_inference", inference)

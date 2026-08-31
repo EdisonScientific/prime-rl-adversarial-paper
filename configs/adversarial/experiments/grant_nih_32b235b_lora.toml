@@ -12,7 +12,7 @@ name = "Qwen/Qwen3-32B"
 
 [generator.wandb]
 project = "grant_nih_v2"
-name = "grant-nih-32bgen-235bjudge-b1024r16-ipo-lora-4nodes"
+name = "grant-nih-32bgen-235bjudge-b1024r16-ipo-lora-5nodes"
 
 [generator.trainer.loss]
 kl_tau = 0.001
@@ -28,6 +28,7 @@ type = "multi_node"
 gpus_per_node = 8
 num_train_nodes = 1
 num_infer_nodes = 1
+num_infer_replicas = 2
 
 [generator.orchestrator]
 batch_size = 1024
