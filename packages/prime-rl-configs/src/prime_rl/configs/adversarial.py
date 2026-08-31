@@ -113,8 +113,9 @@ class AdversarialRoleConfig(BaseConfig):
         if shared is None:
             return self
         if shared.type == "nccl":
+            replicas = self.deployment.num_infer_replicas if self.deployment.type == "multi_node" else 1
             inference_world_size = (
-                self.inference.vllm.data_parallel_size * self.inference.vllm.tensor_parallel_size
+                self.inference.vllm.data_parallel_size * self.inference.vllm.tensor_parallel_size * replicas
                 if self.inference is not None
                 else 1
             )
@@ -193,8 +194,6 @@ class AdversarialRLConfig(BaseConfig):
                     continue
                 if run.deployment.num_infer_nodes != 1:
                     raise ValueError("adversarial-rl inference replicas are one node each; scale num_infer_replicas.")
-                if run.deployment.num_infer_replicas > 1 and run.trainer.weight_broadcast.type != "filesystem":
-                    raise ValueError("adversarial-rl inference replicas require filesystem weight broadcast.")
             elif run.deployment.type != "single_node":
                 raise ValueError("adversarial-rl supports single_node or one-train-one-infer multi_node roles.")
         if self.generator.orchestrator.batch_size is None or self.judge.orchestrator.batch_size is None:
