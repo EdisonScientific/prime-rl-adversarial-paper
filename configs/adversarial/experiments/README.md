@@ -18,7 +18,7 @@ layers.
 | + exact reward only (frozen 0.6B judge) | `smiles2formula_8b32b` + `smiles2formula_8b_exact` | 1 | append `@ .../smiles2formula_8b_exact.toml` |
 | + 8B judge | `smiles2formula_8b32b` + `smiles2formula_8b8b` | half node | `run_shared.sbatch` with the stacked layers |
 | + 8B judge, judge x exact reward | ... + `smiles2formula_8b8b_both` | half node | stack both files on `run_shared.sbatch` |
-| grant NIH 32B gen vs 235B judge, LoRA both roles | `grant_nih_32b235b_lora` | 4 (`--nodes=4`) | `sbatch --nodes=4 configs/adversarial/experiments/run.sbatch grant_abstract grant_nih_32b235b_lora` |
+| grant NIH 32B gen vs 235B judge, LoRA both roles | `grant_nih_32b235b_lora` | 6 (`--nodes=6`) | `sbatch --nodes=6 configs/adversarial/experiments/run.sbatch grant_abstract grant_nih_32b235b_lora` |
 | grant NIH, LoRA generator + full-finetuned judge | `grant_nih_32b235b_genlora` | 8 (`--nodes=8`) | `sbatch --nodes=8 configs/adversarial/experiments/run.sbatch grant_abstract grant_nih_32b235b_genlora` |
 
 Smoke any experiment before a long run: append
