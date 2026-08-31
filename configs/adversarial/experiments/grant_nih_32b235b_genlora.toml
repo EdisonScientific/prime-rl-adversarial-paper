@@ -69,5 +69,7 @@ num_infer_nodes = 1
 batch_size = 2048
 
 [judge.inference.vllm]
-tensor_parallel_size = 8
+# TP-4: at TP-8 the expert intermediate size shards below the CUTLASS MoE
+# kernel's 128-multiple requirement (the LoRA-judge variant dodges that kernel).
+tensor_parallel_size = 4
 max_model_len = 4096
