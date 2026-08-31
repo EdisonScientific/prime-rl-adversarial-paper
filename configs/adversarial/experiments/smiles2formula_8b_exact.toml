@@ -10,6 +10,10 @@ max_skip_streak = "None"
 [generator.wandb]
 name = "smiles2formula-8bgen-exact-b64r8-ipo-1node"
 
+[generator.weight_broadcast]
+type = "nccl"
+port = 29531
+
 [generator.deployment]
 gpus_per_node = 8
 num_infer_gpus = 2
@@ -20,6 +24,10 @@ tensor_parallel_size = 2
 
 [judge.model]
 name = "Qwen/Qwen3-0.6B"
+
+[judge.weight_broadcast]
+type = "nccl"
+port = 29532
 
 [judge.deployment]
 gpus_per_node = 8
