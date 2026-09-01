@@ -26,6 +26,7 @@ EXPERIMENTS = [
     ("deslopify_abstract", ["deslopify_8b8b"]),
     ("deslopify_abstract", ["deslopify_8b8b", "deslopify_8b8b_lora"]),
     ("deslopify_abstract", ["deslopify_14b14b"]),
+    ("multiplication", ["multiplication_ab"]),
 ]
 
 
