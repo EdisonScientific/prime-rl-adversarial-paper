@@ -21,6 +21,7 @@ layers.
 | grant NIH 32B gen vs 235B judge, LoRA both roles | `grant_nih_32b235b_lora` | 6 (`--nodes=6`) | `sbatch --nodes=6 configs/adversarial/experiments/run.sbatch grant_abstract grant_nih_32b235b_lora` |
 | grant NIH, LoRA generator + full-finetuned judge | `grant_nih_32b235b_genlora` | 8 (`--nodes=8`) | `sbatch --nodes=8 configs/adversarial/experiments/run.sbatch grant_abstract grant_nih_32b235b_genlora` |
 | deslopify 8B gen vs 8B judge, full finetune | `deslopify_8b8b` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch deslopify_abstract deslopify_8b8b` |
+| + LoRA both roles | `deslopify_8b8b` + `deslopify_8b8b_lora` | 1 (`--nodes=1`) | append `@ configs/adversarial/experiments/deslopify_8b8b_lora.toml` |
 | deslopify 14B gen vs 14B judge, full finetune | `deslopify_14b14b` | 2 | `sbatch configs/adversarial/experiments/run.sbatch deslopify_abstract deslopify_14b14b` |
 
 Smoke any experiment before a long run: append
