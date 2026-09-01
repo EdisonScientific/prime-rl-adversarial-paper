@@ -1,11 +1,13 @@
 import re
+from collections.abc import Mapping
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 import orjson
 import verifiers as vf
+from pydantic import BaseModel
 from renderers.base import build_trajectory_step
-from verifiers.utils.save_utils import make_serializable
 
 from prime_rl.transports.batch.types import TrainingSample
 from prime_rl.utils.chat_template import deserialize_tool_calls, normalize_messages
@@ -89,6 +91,22 @@ def get_model_completion_len(output: vf.RolloutOutput) -> int:
     """Sum of model-generated completion tokens across all turns (excludes
     environment-injected tokens between turns)."""
     return sum(len(step["tokens"]["completion_ids"]) for step in output["trajectory"] if step.get("tokens"))
+
+
+def make_serializable(value: object) -> str | int | float | bool | list | dict | None:
+    """JSON fallback for non-standard types, vendored from the removed
+    verifiers legacy stack."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(exclude_none=True)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return value.as_posix()
+    if isinstance(value, BaseException):
+        return repr(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return str(value)
 
 
 def save_rollouts(rollouts: list[vf.RolloutOutput], path: Path, exclude_keys: set[str] | None = None) -> None:
