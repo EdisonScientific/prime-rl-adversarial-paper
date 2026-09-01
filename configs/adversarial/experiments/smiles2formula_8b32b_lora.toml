@@ -1,0 +1,22 @@
+output_dir = "outputs/adversarial-smiles2formula-8bgen-32bjudge-lora"
+
+[generator.wandb]
+name = "smiles2formula-8bgen-32bjudge-b64r8-ipo-lora-2nodes"
+
+[generator.weight_broadcast]
+type = "filesystem"
+
+[judge.weight_broadcast]
+type = "filesystem"
+
+[generator.trainer.model.lora]
+rank = 16
+
+[generator.trainer.optim]
+lr = 5e-6
+
+[judge.trainer.model.lora]
+rank = 16
+
+[judge.trainer.optim]
+lr = 1e-5

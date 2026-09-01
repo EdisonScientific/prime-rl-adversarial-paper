@@ -1,0 +1,12 @@
+output_dir = "outputs/adversarial-test-smiles-to-formula"
+
+[generator.wandb]
+name = "adversarial-test-smiles-to-formula"
+
+[generator.orchestrator.eval]
+interval = 250
+num_examples = 800
+group_size = 1
+
+[generator.orchestrator.train.env]
+args = { task = "ether0_smiles_to_formula", dataset_path = "/home/abou/data/datasets/ral_adversarial_hf_ready_20260817/smiles_to_formula_molrqa2_nohint_train17938_eval800_seed1_20260721" }

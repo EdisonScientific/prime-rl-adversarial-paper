@@ -1,0 +1,7 @@
+output_dir = "outputs/adversarial-test-grant-abstract"
+
+[generator.wandb]
+name = "adversarial-test-grant-abstract"
+
+[generator.orchestrator.train.env]
+args = { task = "grant_abstract", dataset_path = "/home/abou/data/datasets/grant_abstracts/grant_abstracts_fy2026_cleanv4_moderate_train20000_seed1.jsonl", num_examples = 20000, seed = 1 }
