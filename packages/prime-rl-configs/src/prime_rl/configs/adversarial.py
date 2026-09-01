@@ -72,9 +72,10 @@ class AdversarialRoleConfig(BaseConfig):
 
     @model_validator(mode="before")
     @classmethod
-    def drop_stale_deployment_variant_keys(cls, data: Any) -> Any:
-        """Layered configs can switch the deployment type but cannot delete the
-        previous variant's keys, so drop the keys the selected variant rejects."""
+    def drop_stale_variant_keys(cls, data: Any) -> Any:
+        """Layered configs can switch a discriminated union's type but cannot
+        delete the previous variant's keys, so drop the keys the selected
+        variant rejects."""
         deployment = data.get("deployment") if isinstance(data, dict) else None
         if isinstance(deployment, dict):
             variant_only_keys = {
@@ -83,6 +84,15 @@ class AdversarialRoleConfig(BaseConfig):
             }
             for key in variant_only_keys.get(deployment.get("type"), ()):
                 deployment.pop(key, None)
+        broadcast = data.get("weight_broadcast") if isinstance(data, dict) else None
+        if isinstance(broadcast, dict):
+            rejected_keys = {
+                "filesystem": ("host", "port", "quantize_in_weight_transfer", "session_id"),
+                "nccl": ("session_id",),
+                "nixl": ("quantize_in_weight_transfer",),
+            }
+            for key in rejected_keys.get(broadcast.get("type"), ()):
+                broadcast.pop(key, None)
         return data
 
     @model_validator(mode="after")
