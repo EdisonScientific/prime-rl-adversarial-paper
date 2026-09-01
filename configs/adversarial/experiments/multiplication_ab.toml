@@ -29,3 +29,16 @@ name = "Qwen/Qwen3-0.6B"
 
 [judge.trainer.optim]
 lr = 1e-6
+
+# The native arm shares the node and owns the default 8000/8001 ports.
+[generator.inference.server]
+port = 8002
+
+[generator.orchestrator.client]
+base_url = "http://localhost:8002/v1"
+
+[judge.inference.server]
+port = 8003
+
+[judge.orchestrator.client]
+base_url = "http://localhost:8003/v1"
