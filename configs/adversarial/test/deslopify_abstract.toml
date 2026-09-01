@@ -1,7 +1,0 @@
-output_dir = "outputs/adversarial-test-deslopify-abstract"
-
-[generator.wandb]
-name = "adversarial-test-deslopify-abstract"
-
-[generator.orchestrator.train.env]
-args = { task = "deslopify_abstract", hf_dataset = "EdisonScientific/abstracts-deslopify-opus5-block-history-v2" }

@@ -1,7 +1,0 @@
-output_dir = "outputs/adversarial-test-paper-abstract"
-
-[generator.wandb]
-name = "adversarial-test-paper-abstract"
-
-[generator.orchestrator.train.env]
-args = { task = "paper_abstract", dataset_path = "/home/abou/data/datasets/paper_abstracts/paper_abstracts_medicine_50to350w_dedup.jsonl", num_examples = 5000, seed = 1 }
