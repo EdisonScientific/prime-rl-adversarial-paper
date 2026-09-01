@@ -198,7 +198,8 @@ async def run_generator_eval(
     for example, rollouts in zip(examples, generator_groups):
         for rollout in rollouts:
             result = generator.env.adversarial_generator_result(rollout.get("completion"), example)
-            rollout["reward"] = float(result["verifiable_reward"])
+            # Free-generation envs have no programmatic check; their eval tracks format compliance.
+            rollout["reward"] = float(result.get("verifiable_reward", result["metrics"]["format_reward"]))
             rollout.setdefault("metrics", {}).update(result["metrics"])
             rollout.setdefault("info", {})
             rollout["info"]["kind"] = "eval_generated"
@@ -549,10 +550,11 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             )
             eval_log_values = {
                 "eval/generator/reward/mean": fmean(float(rollout["reward"]) for rollout in eval_rollouts),
-                "eval/generator/metrics/verifiable_reward/mean": fmean(
-                    float(r["metrics"]["verifiable_reward"]) for r in eval_rollouts
-                ),
             }
+            if "verifiable_reward" in eval_rollouts[0]["metrics"]:
+                eval_log_values["eval/generator/metrics/verifiable_reward/mean"] = fmean(
+                    float(r["metrics"]["verifiable_reward"]) for r in eval_rollouts
+                )
             await monitors.log(eval_log_values, step=0)
             logger.success(f"Step 0 eval | Eval reward: {eval_log_values['eval/generator/reward/mean']:.4f}")
 
@@ -663,9 +665,10 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                     exclude_keys={"trajectory"},
                 )
                 log_values["eval/generator/reward/mean"] = fmean(float(rollout["reward"]) for rollout in eval_rollouts)
-                log_values["eval/generator/metrics/verifiable_reward/mean"] = fmean(
-                    float(r["metrics"]["verifiable_reward"]) for r in eval_rollouts
-                )
+                if "verifiable_reward" in eval_rollouts[0]["metrics"]:
+                    log_values["eval/generator/metrics/verifiable_reward/mean"] = fmean(
+                        float(r["metrics"]["verifiable_reward"]) for r in eval_rollouts
+                    )
             await monitors.log(log_values, step=step)
             logger.success(
                 f"Step {step} | Time: {time.perf_counter() - step_start:.2f}s | "
