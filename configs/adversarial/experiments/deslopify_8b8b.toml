@@ -1,0 +1,78 @@
+output_dir = "outputs/adversarial-deslopify-8bgen-8bjudge"
+
+[judge_update_gate]
+accuracy_threshold = 0.70
+
+[generator]
+max_steps = 15000
+
+[generator.model]
+name = "Qwen/Qwen3-8B"
+
+[generator.wandb]
+project = "deslopify_v1"
+name = "deslopify-8bgen-8bjudge-b1024r16-ipo-1node"
+
+[generator.trainer.loss]
+kl_tau = 0.005
+
+[generator.trainer.optim]
+lr = 5e-7
+
+[generator.weight_broadcast]
+type = "nccl"
+# Both roles share the node, so their broadcast ports must differ.
+port = 29531
+
+[generator.deployment]
+gpus_per_node = 8
+num_infer_gpus = 4
+num_train_gpus = 2
+
+[generator.orchestrator]
+batch_size = 1024
+rollouts_per_example = 16
+
+[generator.orchestrator.eval]
+num_examples = -1
+interval = 50
+
+[generator.orchestrator.train.sampling]
+max_completion_tokens = 3500
+extra_body = { top_k = -1, min_p = 0.0, chat_template_kwargs = { enable_thinking = true }, thinking_token_budget = 1536 }
+
+[generator.inference.vllm]
+tensor_parallel_size = 4
+# Prompts run up to ~700 tokens and completions cap at 3500; a tight ceiling
+# frees KV cache for more concurrent decodes.
+max_model_len = 4608
+# Auto-detection leaves hybrid Qwen3 models parserless, but thinking_token_budget
+# requires the server to track the reasoning block.
+reasoning_parser = "qwen3"
+
+[judge]
+max_steps = 15000
+
+[judge.model]
+name = "Qwen/Qwen3-8B"
+
+[judge.trainer.optim]
+lr = 1e-6
+
+[judge.weight_broadcast]
+type = "nccl"
+port = 29532
+
+[judge.deployment]
+gpus_per_node = 8
+num_infer_gpus = 1
+num_train_gpus = 1
+
+[judge.orchestrator]
+batch_size = 2048
+
+[judge.inference.vllm]
+# Judge steps are prefill-heavy; bigger chunked-prefill bites cut the tail.
+max_num_batched_tokens = 32768
+tensor_parallel_size = 1
+max_model_len = 2048

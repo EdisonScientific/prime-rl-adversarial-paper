@@ -17,6 +17,8 @@ EXPERIMENTS = [
     ("smiles_to_formula", ["smiles2formula_8b32b", "smiles2formula_8b_exact"]),
     ("smiles_to_formula", ["smiles2formula_8b32b", "smiles2formula_8b8b"]),
     ("smiles_to_formula", ["smiles2formula_8b32b", "smiles2formula_8b8b", "smiles2formula_8b8b_both"]),
+    ("deslopify_abstract", ["deslopify_8b8b"]),
+    ("deslopify_abstract", ["deslopify_14b14b"]),
 ]
 
 
