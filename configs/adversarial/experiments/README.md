@@ -12,8 +12,9 @@ layers.
 
 ## Experiments
 
-| Experiment | Stack on `smiles_to_formula` / `grant_abstract` | Nodes | Launch |
+| Experiment | Stack | Nodes | Launch |
 |---|---|---|---|
+| multiplication 0.6B/0.6B (sync arm of the sync-vs-native A/B) | `multiplication_ab` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch multiplication multiplication_ab` |
 | smiles 8B gen vs 32B judge, full finetune | `smiles2formula_8b32b` | 2 | `sbatch configs/adversarial/experiments/run.sbatch smiles_to_formula smiles2formula_8b32b` |
 | + LoRA both roles | `smiles2formula_8b32b` + `smiles2formula_8b32b_lora` | 2 | append `@ configs/adversarial/experiments/smiles2formula_8b32b_lora.toml` |
 | + exact reward only (frozen 0.6B judge) | `smiles2formula_8b32b` + `smiles2formula_8b_exact` | 1 | append `@ .../smiles2formula_8b_exact.toml` |

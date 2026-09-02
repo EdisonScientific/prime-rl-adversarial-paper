@@ -9,6 +9,10 @@ deep-merge in order (later files override earlier keys):
 - `multiplication.toml` — the 4-digit multiplication task. The dataset
   regenerates deterministically from its seed, so the example needs no
   external data.
+- task env layers for the paper runs — `smiles_to_formula.toml`,
+  `grant_abstract.toml`, `deslopify_abstract.toml`: dataset args and run
+  names, stacked under the experiment recipes in `experiments/` (see its
+  README for the launch table).
 
 Run through SLURM:
 

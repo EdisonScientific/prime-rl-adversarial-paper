@@ -9,10 +9,8 @@ CONFIG_DIR = Path("configs/adversarial")
 EXPERIMENT_DIR = Path("configs/adversarial/experiments")
 ENVS = [
     "multiplication",
-    "countdown_code",
     "smiles_to_formula",
     "grant_abstract",
-    "paper_abstract",
     "deslopify_abstract",
 ]
 EXPERIMENTS = [
