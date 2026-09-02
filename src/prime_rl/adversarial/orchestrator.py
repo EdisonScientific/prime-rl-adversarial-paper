@@ -270,21 +270,23 @@ def generated_win_probability(slot_a_probability: float | None, first_label: flo
 
 
 def judge_verifiable_correlation(rollouts: list[vf.RolloutOutput]) -> float | None:
-    """Pearson correlation between the judge probability and the verifiable reward,
-    over the rollouts carrying both. None when the env has no verifiable reward or
-    either value is constant across the batch (e.g. no correct answer yet)."""
+    """Pearson correlation between the judge probability and the env's verifiable
+    distance (each env defines its own, e.g. L1 atom-count distance for formulas),
+    over the rollouts carrying both. An aligned judge is anticorrelated with the
+    distance. None when the env provides no distance or either value is constant
+    across the batch."""
     pairs = [
-        (metrics["judge_reference_probability_proxy"], float(metrics["verifiable_reward"]))
+        (metrics["judge_reference_probability_proxy"], float(metrics["verifiable_distance"]))
         for rollout in rollouts
         if (metrics := rollout["metrics"]).get("judge_reference_probability_proxy") is not None
-        and metrics.get("verifiable_reward") is not None
+        and metrics.get("verifiable_distance") is not None
     ]
     if len(pairs) < 2:
         return None
-    probabilities, rewards = zip(*pairs)
-    if len(set(probabilities)) < 2 or len(set(rewards)) < 2:
+    probabilities, distances = zip(*pairs)
+    if len(set(probabilities)) < 2 or len(set(distances)) < 2:
         return None
-    return correlation(probabilities, rewards)
+    return correlation(probabilities, distances)
 
 
 async def score_and_build_judge_batch(

@@ -67,9 +67,11 @@ class MultiplicationGeneratorEnv(GeneratorEnv):
     def adversarial_generator_result(self, completion: Any, example: dict[str, Any]) -> dict[str, Any]:
         target = int((example.get("info") or {})["product"])
         candidate = self.adversarial_candidate_answer(completion)
-        format_ok = candidate is not None
-        verifiable = float(format_ok and int(candidate.strip().replace(",", "")) == target)
-        return self.generator_result(candidate, format_ok, verifiable)
+        value = int(candidate.strip().replace(",", "")) if candidate is not None else None
+        result = self.generator_result(candidate, candidate is not None, float(value == target))
+        if value is not None:
+            result["metrics"]["verifiable_distance"] = float(abs(value - target))
+        return result
 
 
 def load_environment(kind: str = "generator", **kwargs: Any) -> vf.Environment:

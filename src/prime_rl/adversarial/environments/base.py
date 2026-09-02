@@ -28,7 +28,10 @@ class GeneratorEnv(vf.SingleTurnEnv):
       ``None`` when the completion doesn't follow the answer format.
     - ``adversarial_generator_result(completion, example)``: dict with
       ``candidate``, ``format_ok``, per-rollout ``metrics``, and, only for
-      envs with a programmatic check, ``verifiable_reward``.
+      envs with a programmatic check, ``verifiable_reward``. Envs with a
+      graded notion of error may also report a ``verifiable_distance``
+      metric (0 = exact); the orchestrator correlates it with the judge
+      probability.
     - ``adversarial_judge_prompt(question, candidate)``: the A/B classification
       prompt for the judge.
 
