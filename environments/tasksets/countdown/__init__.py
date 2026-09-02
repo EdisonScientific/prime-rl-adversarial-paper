@@ -1,6 +1,8 @@
-"""The reward runs the submitted solution.py against the canonical test file,
-so a modified test.py cannot game it."""
+"""The reward runs the submitted solution.py against the canonical test file
+with the reference problem's numbers and target bound after it, so neither a
+modified test.py nor a substituted easier problem can game it."""
 
+import ast
 import asyncio
 import json
 import sys
@@ -47,9 +49,30 @@ def countdown_files(text: str) -> dict[str, str] | None:
     return None
 
 
-async def canonical_test_passes(solution: str) -> bool:
+def reference_problem(reference: str) -> tuple[list[int], int]:
+    """The problem's numbers and target, read from the gold completion's
+    solution.py assignments. Gold completions are trusted, so a reference that
+    doesn't declare the problem is a dataset error."""
+    files = countdown_files(reference.rpartition("</think>")[2].strip())
+    if files is None:
+        raise ValueError("countdown reference completion is not a two-file JSON")
+    declared: dict = {}
+    for node in ast.walk(ast.parse(files["solution.py"])):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            if name in ("numbers", "target") and name not in declared:
+                declared[name] = ast.literal_eval(node.value)
+    if "numbers" not in declared or "target" not in declared:
+        raise ValueError("countdown reference solution declares no numbers/target")
+    return sorted(int(n) for n in declared["numbers"]), int(declared["target"])
+
+
+async def canonical_test_passes(solution: str, numbers: list[int], target: int) -> bool:
+    # The reference problem is bound after the solution runs, so the model's
+    # own numbers/target assignments cannot reach the verifier.
     script = (
-        f"import math\nimport random\n{solution}\n{COUNTDOWN_TEST_PY}\nprint(verify_solution(numbers, target, expr))"
+        f"import math\nimport random\n{solution}\nnumbers = {numbers}\ntarget = {target}\n"
+        f"{COUNTDOWN_TEST_PY}\nprint(verify_solution(numbers, target, expr))"
     )
     process = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -70,7 +93,8 @@ async def verifiable_reward(reply: str, reference: str) -> float:
     files = countdown_files(reply.rpartition("</think>")[2].strip())
     if files is None or not files["solution.py"].strip():
         return 0.0
-    return float(await canonical_test_passes(files["solution.py"].strip()))
+    numbers, target = reference_problem(reference)
+    return float(await canonical_test_passes(files["solution.py"].strip(), numbers, target))
 
 
 CountdownTaskset = make_taskset("Countdown", "EdisonScientific/countdown", verifiable_reward)
