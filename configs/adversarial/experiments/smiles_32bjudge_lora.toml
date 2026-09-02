@@ -1,3 +1,4 @@
+# LoRA-vs-full-FT comparison arm: stacks on smiles_32bjudge.
 output_dir = "outputs/adversarial-smiles2formula-8bgen-32bjudge-lora"
 
 [generator.wandb]

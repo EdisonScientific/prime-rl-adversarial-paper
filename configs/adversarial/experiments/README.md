@@ -26,11 +26,12 @@ layers.
 | + 32B judge | `countdown_1p7b1p7b` + `countdown_32bjudge` | 2 | `sbatch configs/adversarial/experiments/run.sbatch countdown_code countdown_1p7b1p7b @ configs/adversarial/experiments/countdown_32bjudge.toml` |
 | + exact reward only (frozen 1.7B judge) | `countdown_1p7b1p7b` + `countdown_exact` | half node | append `@ .../countdown_exact.toml` |
 | + judge x exact reward | `countdown_1p7b1p7b` + `countdown_judgexexact` | half node | append `@ .../countdown_judgexexact.toml` |
-| smiles 8B gen vs 32B judge, full finetune | `smiles2formula_8b32b` | 2 | `sbatch configs/adversarial/experiments/run.sbatch smiles_to_formula smiles2formula_8b32b` |
-| + LoRA both roles | `smiles2formula_8b32b` + `smiles2formula_8b32b_lora` | 2 | append `@ configs/adversarial/experiments/smiles2formula_8b32b_lora.toml` |
-| + exact reward only (frozen 0.6B judge) | `smiles2formula_8b32b` + `smiles2formula_8b_exact` | 1 | append `@ .../smiles2formula_8b_exact.toml` |
-| + 8B judge | `smiles2formula_8b32b` + `smiles2formula_8b8b` | half node | `run_shared.sbatch` with the stacked layers |
-| + 8B judge, judge x exact reward | ... + `smiles2formula_8b8b_both` | half node | stack both files on `run_shared.sbatch` |
+| smiles 8B gen vs 8B judge (paper family base) | `smiles_8b8b` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch smiles_to_formula smiles_8b8b` |
+| + 14B judge | `smiles_8b8b` + `smiles_14bjudge` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch smiles_to_formula smiles_8b8b @ configs/adversarial/experiments/smiles_14bjudge.toml` |
+| + 32B judge | `smiles_8b8b` + `smiles_32bjudge` | 2 | append `@ .../smiles_32bjudge.toml` on `run.sbatch` |
+| + 32B judge, LoRA both roles | ... + `smiles_32bjudge_lora` | 2 | append both overlays |
+| + exact reward only (frozen 0.6B judge) | `smiles_8b8b` + `smiles_exact` | 1 (`--nodes=1`) | append `@ .../smiles_exact.toml` on `run.sbatch` |
+| + judge x exact reward | `smiles_8b8b` + `smiles_judgexexact` | half node | append `@ .../smiles_judgexexact.toml` |
 | grant NIH 32B gen vs 235B judge, LoRA both roles | `grant_nih_32b235b_lora` | 6 (`--nodes=6`) | `sbatch --nodes=6 configs/adversarial/experiments/run.sbatch grant_abstract grant_nih_32b235b_lora` |
 | grant NIH, LoRA generator + full-finetuned judge | `grant_nih_32b235b_genlora` | 8 (`--nodes=8`) | `sbatch --nodes=8 configs/adversarial/experiments/run.sbatch grant_abstract grant_nih_32b235b_genlora` |
 | deslopify 8B gen vs 8B judge, full finetune | `deslopify_8b8b` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch deslopify_abstract deslopify_8b8b` |
