@@ -1,5 +1,6 @@
 import ast
 import json
+import math
 import subprocess
 import sys
 from typing import Any
@@ -137,6 +138,7 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
         files = countdown_load_json_from_response(completion) if self.reasoning_ok(completion) else None
         candidate = None if files is None else json.dumps(files, sort_keys=True)
         verifiable = 0.0
+        distance = None
         if files is not None and files["solution.py"].strip():
             # The reference problem is bound after the solution runs, so the
             # model's own numbers/target assignments cannot reach the verifier.
@@ -147,7 +149,11 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
                 f"numbers = {reference_numbers}\n"
                 f"target = {reference_target}\n"
                 f"{COUNTDOWN_TEST_PY}\n"
-                "print(verify_solution(numbers, target, expr))"
+                "print(verify_solution(numbers, target, expr))\n"
+                "try:\n"
+                "    print(float(eval(expr, {'__builtins__': None}, {})))\n"
+                "except Exception:\n"
+                "    print(None)"
             )
             try:
                 proc = subprocess.run(
@@ -158,10 +164,21 @@ class CountdownCodeGeneratorEnv(GeneratorEnv):
                     timeout=2,
                     check=False,
                 )
-                verifiable = float(proc.returncode == 0 and proc.stdout.strip() == "True")
+                # Exactly the verdict and value lines: a solution that prints
+                # anything itself fails verification, as before.
+                lines = proc.stdout.strip().splitlines()
+                verifiable = float(proc.returncode == 0 and len(lines) == 2 and lines[0] == "True")
+                if proc.returncode == 0 and len(lines) == 2:
+                    try:
+                        value = float(lines[1])
+                        distance = abs(value - reference_target) if math.isfinite(value) else None
+                    except ValueError:
+                        distance = None
             except subprocess.TimeoutExpired:
                 verifiable = 0.0
         result = self.generator_result(candidate, files is not None, verifiable)
+        if distance is not None:
+            result["metrics"]["verifiable_distance"] = distance
         if files is not None:
             result["metrics"]["modified_test"] = float(files["test.py"].strip() != COUNTDOWN_TEST_PY.strip())
             result["metrics"]["declared_problem_matches"] = declared_problem_matches(

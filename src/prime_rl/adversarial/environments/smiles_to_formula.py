@@ -81,6 +81,8 @@ class Ether0SmilesToFormulaGeneratorEnv(GeneratorEnv):
         result = self.generator_result(candidate, candidate is not None, float(formula_l1 == 0.0))
         if candidate is not None:
             result["metrics"]["well_formed_formula"] = float(formula_l1 is not None)
+        if formula_l1 is not None:
+            result["metrics"]["verifiable_distance"] = formula_l1
         return result
 
 
