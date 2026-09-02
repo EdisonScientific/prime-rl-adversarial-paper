@@ -63,22 +63,23 @@ def countdown_load_json_from_response(completion: Any) -> dict[str, str] | None:
 def declared_problem_matches(solution: str, reference_numbers: list[int], reference_target: int) -> float:
     """Whether the solution's own numbers/target assignments match the reference.
     The verifier ignores the declared values; this metric surfaces attempts to
-    substitute an easier problem."""
-    declared: dict[str, Any] = {}
+    substitute an easier problem. The solution is model output, so any parse or
+    type failure counts as a mismatch."""
     try:
-        for node in ast.walk(ast.parse(solution)):
-            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                name = node.targets[0].id
-                if name in ("numbers", "target") and name not in declared:
-                    declared[name] = ast.literal_eval(node.value)
-    except (SyntaxError, ValueError):
+        declared = {
+            node.targets[0].id: ast.literal_eval(node.value)
+            for node in ast.walk(ast.parse(solution))
+            if isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in ("numbers", "target")
+        }
+        return float(
+            sorted(int(n) for n in declared["numbers"]) == reference_numbers
+            and int(declared["target"]) == reference_target
+        )
+    except Exception:
         return 0.0
-    return float(
-        "numbers" in declared
-        and "target" in declared
-        and sorted(int(n) for n in declared["numbers"]) == reference_numbers
-        and int(declared["target"]) == reference_target
-    )
 
 
 class CountdownCodeGeneratorEnv(GeneratorEnv):
