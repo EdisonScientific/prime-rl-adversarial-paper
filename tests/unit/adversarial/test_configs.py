@@ -9,6 +9,7 @@ CONFIG_DIR = Path("configs/adversarial")
 EXPERIMENT_DIR = Path("configs/adversarial/experiments")
 ENVS = [
     "multiplication",
+    "countdown_code",
     "smiles_to_formula",
     "grant_abstract",
     "deslopify_abstract",
@@ -30,6 +31,13 @@ EXPERIMENTS = [
     ("multiplication", ["multiplication_06b06b", "multiplication_4bjudge"]),
     ("multiplication", ["multiplication_06b06b", "multiplication_exact"]),
     ("multiplication", ["multiplication_06b06b", "multiplication_judgexexact"]),
+    ("countdown_code", ["countdown_1p7b1p7b"]),
+    ("countdown_code", ["countdown_1p7b1p7b", "countdown_4bjudge"]),
+    ("countdown_code", ["countdown_1p7b1p7b", "countdown_8bjudge"]),
+    ("countdown_code", ["countdown_1p7b1p7b", "countdown_14bjudge"]),
+    ("countdown_code", ["countdown_1p7b1p7b", "countdown_32bjudge"]),
+    ("countdown_code", ["countdown_1p7b1p7b", "countdown_exact"]),
+    ("countdown_code", ["countdown_1p7b1p7b", "countdown_judgexexact"]),
 ]
 
 

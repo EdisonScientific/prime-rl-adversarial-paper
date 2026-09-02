@@ -1,0 +1,5 @@
+output_dir = "outputs/adversarial-countdown-judgexexact"
+generator_reward_mode = "judge_times_exact"
+
+[generator.wandb]
+name = "countdown-1.7bgen-1.7bjudge-judgexexact-b64r8-ipo"

@@ -20,6 +20,12 @@ layers.
 | + exact reward only (frozen 0.6B judge) | `multiplication_06b06b` + `multiplication_exact` | half node | append `@ .../multiplication_exact.toml` |
 | + judge x exact reward | `multiplication_06b06b` + `multiplication_judgexexact` | half node | append `@ .../multiplication_judgexexact.toml` |
 | multiplication 0.6B/0.6B (sync arm of the sync-vs-native A/B) | `multiplication_ab` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch multiplication multiplication_ab` |
+| countdown 1.7B gen vs 1.7B judge (paper family base) | `countdown_1p7b1p7b` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch countdown_code countdown_1p7b1p7b` |
+| + 4B or 8B judge | `countdown_1p7b1p7b` + `countdown_4bjudge` / `countdown_8bjudge` | half node | append the judge overlay |
+| + 14B judge | `countdown_1p7b1p7b` + `countdown_14bjudge` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch countdown_code countdown_1p7b1p7b @ configs/adversarial/experiments/countdown_14bjudge.toml` |
+| + 32B judge | `countdown_1p7b1p7b` + `countdown_32bjudge` | 2 | `sbatch configs/adversarial/experiments/run.sbatch countdown_code countdown_1p7b1p7b @ configs/adversarial/experiments/countdown_32bjudge.toml` |
+| + exact reward only (frozen 1.7B judge) | `countdown_1p7b1p7b` + `countdown_exact` | half node | append `@ .../countdown_exact.toml` |
+| + judge x exact reward | `countdown_1p7b1p7b` + `countdown_judgexexact` | half node | append `@ .../countdown_judgexexact.toml` |
 | smiles 8B gen vs 32B judge, full finetune | `smiles2formula_8b32b` | 2 | `sbatch configs/adversarial/experiments/run.sbatch smiles_to_formula smiles2formula_8b32b` |
 | + LoRA both roles | `smiles2formula_8b32b` + `smiles2formula_8b32b_lora` | 2 | append `@ configs/adversarial/experiments/smiles2formula_8b32b_lora.toml` |
 | + exact reward only (frozen 0.6B judge) | `smiles2formula_8b32b` + `smiles2formula_8b_exact` | 1 | append `@ .../smiles2formula_8b_exact.toml` |

@@ -1,0 +1,44 @@
+# Paper countdown-code family base: 1.7B generator vs 1.7B judge. The judge
+# swaps (4B/8B/14B/32B) and the reward variants stack on this file. Judge
+# context, sampling, and the binary judge setup come from base.toml; the
+# dataset (15k train / 800 eval) from countdown_code.toml.
+
+output_dir = "outputs/adversarial-countdown-1p7b1p7b"
+
+[judge_update_gate]
+max_skip_streak = 50
+
+[generator]
+max_steps = 10000
+seq_len = 16384
+
+[generator.model]
+name = "Qwen/Qwen3-1.7B"
+
+[generator.wandb]
+project = "countdown_code_v2"
+name = "countdown-1.7bgen-1.7bjudge-b64r8-ipo"
+
+[generator.trainer.loss]
+kl_tau = 0.005
+
+[generator.trainer.optim]
+lr = 5e-7
+
+[generator.orchestrator]
+batch_size = 64
+
+[generator.orchestrator.train.sampling]
+max_completion_tokens = 8192
+
+[generator.inference.vllm]
+max_model_len = 16384
+
+[judge]
+max_steps = 10000
+
+[judge.trainer.optim]
+lr = 1e-6
+
+[judge.orchestrator]
+batch_size = 128
