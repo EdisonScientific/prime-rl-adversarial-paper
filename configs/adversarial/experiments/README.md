@@ -26,6 +26,7 @@ layers.
 | + 32B judge | `countdown_1p7b1p7b` + `countdown_32bjudge` | 2 | `sbatch configs/adversarial/experiments/run.sbatch countdown_code countdown_1p7b1p7b @ configs/adversarial/experiments/countdown_32bjudge.toml` |
 | + exact reward only (frozen 1.7B judge) | `countdown_1p7b1p7b` + `countdown_exact` | half node | append `@ .../countdown_exact.toml` |
 | + judge x exact reward | `countdown_1p7b1p7b` + `countdown_judgexexact` | half node | append `@ .../countdown_judgexexact.toml` |
+| medical abstracts 8B gen vs learned 14B judge | `medical_8b14b` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch medical_abstract medical_8b14b` |
 | smiles 8B gen vs 8B judge (paper family base) | `smiles_8b8b` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch smiles_to_formula smiles_8b8b` |
 | + 14B judge | `smiles_8b8b` + `smiles_14bjudge` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch smiles_to_formula smiles_8b8b @ configs/adversarial/experiments/smiles_14bjudge.toml` |
 | + 32B judge | `smiles_8b8b` + `smiles_32bjudge` | 2 | append `@ .../smiles_32bjudge.toml` on `run.sbatch` |

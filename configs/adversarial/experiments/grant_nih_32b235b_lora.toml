@@ -1,10 +1,10 @@
 output_dir = "outputs/adversarial-grant-nih-32bgen-235bjudge-lora"
 
 [judge_update_gate]
-accuracy_threshold = 0.70
+max_skip_streak = 50
 
 [generator]
-max_steps = 15000
+max_steps = 3000
 seq_len = 8192
 
 [generator.model]
@@ -15,13 +15,13 @@ project = "grant_nih_v2"
 name = "grant-nih-32bgen-235bjudge-b1024r16-ipo-lora-6nodes"
 
 [generator.trainer.loss]
-kl_tau = 0.001
+kl_tau = 0.05
 
 [generator.trainer.model.lora]
 rank = 32
 
 [generator.trainer.optim]
-lr = 3e-6
+lr = 2e-6
 
 [generator.weight_broadcast]
 type = "filesystem"
@@ -56,7 +56,7 @@ max_model_len = 5120
 reasoning_parser = "qwen3"
 
 [judge]
-max_steps = 15000
+max_steps = 3000
 seq_len = 4096
 
 [judge.model]

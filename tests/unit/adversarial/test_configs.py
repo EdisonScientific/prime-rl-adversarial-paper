@@ -13,6 +13,7 @@ ENVS = [
     "smiles_to_formula",
     "grant_abstract",
     "deslopify_abstract",
+    "medical_abstract",
 ]
 EXPERIMENTS = [
     ("smiles_to_formula", ["smiles_8b8b"]),
@@ -39,6 +40,7 @@ EXPERIMENTS = [
     ("countdown_code", ["countdown_1p7b1p7b", "countdown_32bjudge"]),
     ("countdown_code", ["countdown_1p7b1p7b", "countdown_exact"]),
     ("countdown_code", ["countdown_1p7b1p7b", "countdown_judgexexact"]),
+    ("medical_abstract", ["medical_8b14b"]),
 ]
 
 
