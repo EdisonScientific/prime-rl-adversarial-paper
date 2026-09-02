@@ -14,6 +14,11 @@ layers.
 
 | Experiment | Stack | Nodes | Launch |
 |---|---|---|---|
+| multiplication 0.6B gen vs 0.6B judge (paper family base) | `multiplication_06b06b` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch multiplication multiplication_06b06b` |
+| + 1.7B judge | `multiplication_06b06b` + `multiplication_1p7bjudge` | half node | append `@ configs/adversarial/experiments/multiplication_1p7bjudge.toml` |
+| + 4B judge | `multiplication_06b06b` + `multiplication_4bjudge` | half node | append `@ configs/adversarial/experiments/multiplication_4bjudge.toml` |
+| + exact reward only (frozen 0.6B judge) | `multiplication_06b06b` + `multiplication_exact` | half node | append `@ .../multiplication_exact.toml` |
+| + judge x exact reward | `multiplication_06b06b` + `multiplication_judgexexact` | half node | append `@ .../multiplication_judgexexact.toml` |
 | multiplication 0.6B/0.6B (sync arm of the sync-vs-native A/B) | `multiplication_ab` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch multiplication multiplication_ab` |
 | smiles 8B gen vs 32B judge, full finetune | `smiles2formula_8b32b` | 2 | `sbatch configs/adversarial/experiments/run.sbatch smiles_to_formula smiles2formula_8b32b` |
 | + LoRA both roles | `smiles2formula_8b32b` + `smiles2formula_8b32b_lora` | 2 | append `@ configs/adversarial/experiments/smiles2formula_8b32b_lora.toml` |

@@ -25,6 +25,11 @@ EXPERIMENTS = [
     ("deslopify_abstract", ["deslopify_8b8b", "deslopify_8b8b_lora"]),
     ("deslopify_abstract", ["deslopify_14b14b"]),
     ("multiplication", ["multiplication_ab"]),
+    ("multiplication", ["multiplication_06b06b"]),
+    ("multiplication", ["multiplication_06b06b", "multiplication_1p7bjudge"]),
+    ("multiplication", ["multiplication_06b06b", "multiplication_4bjudge"]),
+    ("multiplication", ["multiplication_06b06b", "multiplication_exact"]),
+    ("multiplication", ["multiplication_06b06b", "multiplication_judgexexact"]),
 ]
 
 

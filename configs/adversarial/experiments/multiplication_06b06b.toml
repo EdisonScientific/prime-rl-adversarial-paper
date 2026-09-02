@@ -1,0 +1,22 @@
+# Paper multiplication family base: 0.6B generator vs 0.6B judge.
+# Everything else (batch 128 r8, judge 256 r1, seq 8192/2048, max completions
+# 2048/1, temperature 1.0 with thinking, gen lr 1e-7, kl_tau 0.02, 20k train
+# examples, 800 eval examples every 250 steps, 3000 steps) comes from
+# base.toml @ multiplication.toml. Judge swaps and reward variants stack on
+# this file.
+
+output_dir = "outputs/adversarial-mult-06b06b"
+
+[judge_update_gate]
+accuracy_threshold = 0.90
+max_skip_streak = 20
+
+[generator.wandb]
+project = "multiplication_v2"
+name = "multiplication-4digit-0.6bgen-0.6bjudge-b128r8-ipo"
+
+[judge.model]
+name = "Qwen/Qwen3-0.6B"
+
+[judge.trainer.optim]
+lr = 1e-6
