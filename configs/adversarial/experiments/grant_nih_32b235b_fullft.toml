@@ -1,14 +1,13 @@
 output_dir = "outputs/adversarial-grant-nih-32bgen-235bjudge-fullft"
 
-# Full-finetune rerun of the legacy 20260821 setting (b1024r16, jb2048,
-# kl 1e-3, both lrs 3e-7, gate 0.70/100) on the current stack. Deviations for
-# speed: completions cap at 3500 with a 1536 thinking budget instead of the
-# legacy 8192 unbudgeted, and the generator trains with IPO instead of the
-# legacy clip-high objective.
+# Full-finetune rerun of the legacy 20260814 setting (b1024r16, jb2048,
+# kl 5e-2, gen lr 2e-7, judge lr 3e-7, gate 0.75/50, 3500 tokens with a 1536
+# thinking budget) on the current stack. Deviations: IPO instead of the legacy
+# clip-high objective, no DAPO overlong penalty, and six nodes instead of
+# eight (one generator trainer node, three judge trainer nodes).
 
 [judge_update_gate]
-accuracy_threshold = 0.7
-max_skip_streak = 100
+max_skip_streak = 50
 
 [generator]
 max_steps = 3000
@@ -22,10 +21,10 @@ project = "grant_nih_v2"
 name = "grant-nih-32bgen-235bjudge-b1024r16-ipo-fullft-6nodes"
 
 [generator.trainer.loss]
-kl_tau = 0.001
+kl_tau = 0.05
 
 [generator.trainer.optim]
-lr = 3e-7
+lr = 2e-7
 
 [generator.weight_broadcast]
 type = "nccl"
@@ -79,12 +78,15 @@ port = 29542
 # Cold model loads can exceed the default 1200s handshake window.
 timeout = 3600
 
+# One TP-4 judge engine: a second replica would claim its own node and push
+# the run to seven. Half the infer node idles; revisit with TP-8 +
+# flashinfer_cutlass (the legacy ficutlassmoe fix) if judge_tail dominates.
 [judge.deployment]
 type = "multi_node"
 gpus_per_node = 8
 num_train_nodes = 3
 num_infer_nodes = 1
-num_infer_replicas = 2
+num_infer_replicas = 1
 
 [judge.orchestrator]
 batch_size = 2048
