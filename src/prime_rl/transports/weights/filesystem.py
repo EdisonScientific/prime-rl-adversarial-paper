@@ -27,7 +27,7 @@ class FileSystemWeightSender(WeightSender):
         config: FileSystemWeightBroadcastConfig,
         lora_config: LoRAConfig | None = None,
     ):
-        super().__init__(output_dir, config.timeout)
+        super().__init__(output_dir, config.timeout, config.ema_decay)
         self.lora_config = lora_config
         self.logger.debug("Initialized filesystem weight broadcast")
 

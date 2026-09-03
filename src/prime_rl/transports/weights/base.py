@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import final
 
+import torch
 import torch.nn as nn
 from httpx import AsyncClient
 
@@ -44,30 +45,60 @@ class WeightSender(ABC):
     (``.finished``). The trainer therefore runs in lockstep with its consumer
     on every transport — a broadcast nobody receives blocks and then fails."""
 
-    def __init__(self, output_dir: Path, timeout: int):
+    def __init__(self, output_dir: Path, timeout: int, ema_decay: float | None = None):
         self.logger = get_logger()
         self.world = get_world()
         self.output_dir = output_dir
         self.timeout = timeout
+        self.ema_decay = ema_decay
+        self._shadow: list[torch.Tensor] | None = None
 
     @final
     def broadcast(self, model: nn.Module, step: int) -> None:
         """Broadcast policy v{step} to the inference pool."""
         start_time = time.perf_counter()
-        step_dir = self.step_dir(step)
-        if self.world.is_master:
-            # Reset per attempt so a re-broadcast (e.g. on resume) never trips
-            # the consumer or the trainer on stale markers of a previous run.
-            shutil.rmtree(step_dir, ignore_errors=True)
-            step_dir.mkdir(parents=True)
-            (step_dir / SENDER_READY_MARKER).touch()
-            self._wait_for_receiver_ready(step_dir)
-            (step_dir / STARTED_MARKER).touch()
-        self._broadcast(model, step, step_dir)
+        swapped = self._swap_in_shadow(model)
+        try:
+            step_dir = self.step_dir(step)
+            if self.world.is_master:
+                # Reset per attempt so a re-broadcast (e.g. on resume) never trips
+                # the consumer or the trainer on stale markers of a previous run.
+                shutil.rmtree(step_dir, ignore_errors=True)
+                step_dir.mkdir(parents=True)
+                (step_dir / SENDER_READY_MARKER).touch()
+                self._wait_for_receiver_ready(step_dir)
+                (step_dir / STARTED_MARKER).touch()
+            self._broadcast(model, step, step_dir)
+        finally:
+            if swapped:
+                self._swap_shadow(model)
         if self.world.is_master:
             (step_dir / FINISHED_MARKER).touch()
             self._clean(step)
             self.logger.debug(f"Broadcasted weights for step {step} in {time.perf_counter() - start_time:.2f}s")
+
+    def _swap_in_shadow(self, model: nn.Module) -> bool:
+        """Polyak-average the trainable weights into the shadow copy and swap it
+        in for the transfer: consumers serve a slow target that trails training,
+        SAC-style, while optimization continues on the live weights. The shadow
+        shards with the model and re-seeds from the live weights on restart."""
+        if self.ema_decay is None:
+            return False
+        with torch.no_grad():
+            params = [param for param in model.parameters() if param.requires_grad]
+            if self._shadow is None:
+                self._shadow = [param.detach().clone() for param in params]
+            else:
+                for shadow, param in zip(self._shadow, params, strict=True):
+                    shadow.lerp_(param.detach(), 1.0 - self.ema_decay)
+        self._swap_shadow(model)
+        return True
+
+    def _swap_shadow(self, model: nn.Module) -> None:
+        assert self._shadow is not None
+        params = [param for param in model.parameters() if param.requires_grad]
+        for idx, param in enumerate(params):
+            self._shadow[idx], param.data = param.data, self._shadow[idx]
 
     def step_dir(self, step: int) -> Path:
         return get_step_path(get_broadcast_dir(self.output_dir), step)
