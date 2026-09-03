@@ -12,7 +12,7 @@ name = "Qwen/Qwen3-32B"
 
 [generator.wandb]
 project = "grant_nih_v2"
-name = "grant-nih-32bgen-235bjudge-b1024r16-ipo-fullft-6nodes"
+name = "grant-nih-32bgen-235bjudge-b1024r16-ipo-fullft-7nodes"
 
 [generator.trainer.loss]
 kl_tau = 0.05
