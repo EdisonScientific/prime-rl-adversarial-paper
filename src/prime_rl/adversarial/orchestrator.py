@@ -573,10 +573,13 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             ]
             # Generation only needs the generator weights, so the judge's slow
             # broadcast from the previous step overlaps it; scoring is what
-            # requires the updated judge, and it starts after this await.
+            # requires the updated judge, and it starts after this await. The
+            # router's circuit breaker can trail a long weight reload, so wait
+            # for the pool instead of firing scoring into the cooldown window.
             if pending_judge_update is not None:
                 await pending_judge_update
                 pending_judge_update = None
+                await judge.admin.wait_for_ready(judge.model_name)
             scored = await score_and_build_judge_batch(
                 generator.env,
                 judge,
