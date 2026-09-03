@@ -104,10 +104,16 @@ class WeightSender(ABC):
             elapsed = self._advance_ema_clock()
             if self._shadow is None:
                 self._shadow = [param.detach().clone() for param in params]
+                if self.world.is_master:
+                    self.logger.info(f"Seeded the EMA target shadow from the live weights ({len(params)} tensors)")
             else:
                 alpha = 1.0 - self.ema_decay**elapsed
                 for shadow, param in zip(self._shadow, params, strict=True):
                     shadow.lerp_(param.detach(), alpha)
+                if self.world.is_master:
+                    self.logger.info(
+                        f"EMA target absorbed {elapsed} clock step(s) toward the learner (alpha={alpha:.4f})"
+                    )
         self._swap_shadow(model)
         return True
 
