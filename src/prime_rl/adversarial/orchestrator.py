@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 from dataclasses import dataclass
 from statistics import correlation, fmean
@@ -9,6 +10,7 @@ from renderers.base import create_renderer
 
 import prime_rl._compat  # noqa: F401
 import prime_rl.monitors as monitors
+from prime_rl.adversarial.replay import ReplayBuffer, ReplayItem, seed_replay_buffer
 from prime_rl.adversarial.utils import (
     backfill_rollout_tokens,
     get_model_completion_len,
@@ -298,6 +300,9 @@ async def score_and_build_judge_batch(
     examples: list[dict[str, Any]],
     reward_mode: str,
     judge_objective: str,
+    replay_buffer: ReplayBuffer | None = None,
+    replay_fraction: float = 0.0,
+    replay_rng: random.Random | None = None,
 ) -> ScoredBatch:
     """Judging is pipelined into generation: each group's judge calls dispatch as
     soon as that group finishes generating, so judge prefill overlaps the still
@@ -307,6 +312,7 @@ async def score_and_build_judge_batch(
     judge_tasks: list[asyncio.Task[vf.RolloutOutput]] = []
     scored_positions: list[tuple[vf.RolloutOutput, dict[str, Any], float, int]] = []
     generator_rewards: list[float] = []
+    fresh_items: list[ReplayItem] = []
 
     def assign_generator_reward(
         rollout: vf.RolloutOutput,
@@ -348,6 +354,10 @@ async def score_and_build_judge_batch(
                 )
             else:
                 tasks = single_candidate_judge_tasks(generator_env, question, reference, result["candidate"])
+            if replay_buffer is not None:
+                fresh_items.append(
+                    ReplayItem(question=question, candidate=result["candidate"], reference=reference, step=step)
+                )
             scored_positions.append((rollout, result, tasks[0][1], len(judge_tasks)))
             # Unique judge example ids across steps/groups/rollouts.
             base_id = step * 1_000_000 + group_idx * 10_000 + rollout_idx * 2
@@ -364,6 +374,45 @@ async def score_and_build_judge_batch(
                         )
                     )
                 )
+
+    if replay_buffer is not None and replay_fraction > 0.0 and replay_rng is not None:
+        # Sample the window before this step's generations enter it, then extend
+        # the judge batch with replayed negatives and their references so the
+        # class balance holds. Replay never feeds rewards or the gate.
+        for idx, item in enumerate(replay_buffer.sample(int(replay_fraction * len(scored_positions)), replay_rng)):
+            if judge_objective == "pairwise":
+                tasks = [
+                    (prompt, label, "replay")
+                    for prompt, label, _ in pairwise_judge_tasks(
+                        generator_env,
+                        item.question,
+                        item.reference,
+                        item.candidate,
+                        reference_first=(step + idx) % 2 == 0,
+                    )
+                ]
+            else:
+                tasks = [
+                    (generator_env.adversarial_judge_prompt(item.question, item.candidate), 0.0, "replay"),
+                    (generator_env.adversarial_judge_prompt(item.question, item.reference), 1.0, "replay_reference"),
+                ]
+            for offset, (prompt, label, kind) in enumerate(tasks):
+                judge_tasks.append(
+                    asyncio.create_task(
+                        run_judge_rollout(
+                            judge,
+                            example_id=step * 1_000_000 + 900_000 + idx * 2 + offset,
+                            prompt=prompt,
+                            label=label,
+                            kind=kind,
+                            cache_salt=str(judge.ckpt_step),
+                            info={"replay_step": item.step},
+                        )
+                    )
+                )
+    if replay_buffer is not None:
+        for item in fresh_items:
+            replay_buffer.add(item)
 
     generation_seconds = time.perf_counter() - phase_start
     judge_rollouts = await asyncio.gather(*judge_tasks) if judge_tasks else []
@@ -560,6 +609,22 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             await monitors.log(eval_log_values, step=0)
             logger.success(f"Step 0 eval | Eval reward: {eval_log_values['eval/generator/reward/mean']:.4f}")
 
+        replay_buffer: ReplayBuffer | None = None
+        replay_rng: random.Random | None = None
+        if config.judge_replay.fraction > 0.0:
+            capacity = config.judge_replay.buffer_batches * config.generator.orchestrator.batch_size
+            replay_buffer = ReplayBuffer(capacity)
+            replay_rng = random.Random(config.generator.orchestrator.seed)
+            seeded = seed_replay_buffer(
+                replay_buffer,
+                get_rollout_dir(config.output_dir),
+                generator.env,
+                start_step,
+                config.judge_replay.buffer_batches,
+            )
+            if seeded:
+                logger.info(f"Seeded the judge replay buffer with {seeded} samples from saved rollouts")
+
         pending_judge_update: asyncio.Task[None] | None = None
         for step in range(start_step, get_max_steps(config.generator)):
             step_start = time.perf_counter()
@@ -588,6 +653,9 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 examples=batch_examples,
                 reward_mode=config.generator_reward_mode,
                 judge_objective=config.judge_objective,
+                replay_buffer=replay_buffer,
+                replay_fraction=config.judge_replay.fraction,
+                replay_rng=replay_rng,
             )
             generator_rollouts = [rollout for group in scored.generator_groups for rollout in group]
 
@@ -596,7 +664,14 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 for key, value in rollout["metrics"].items():
                     if value is not None:
                         generator_metrics.setdefault(key, []).append(float(value))
-            judge_rewards = [float(r["reward"]) for r in scored.judge_rollouts]
+            # The gate balances the judge against the current generator only;
+            # replayed history trains the judge but never inflates its accuracy.
+            judge_rewards = [
+                float(r["reward"])
+                for r in scored.judge_rollouts
+                if not str(r.get("info", {}).get("kind", "")).startswith("replay")
+            ]
+            replay_judge_rollouts = [r for r in scored.judge_rollouts if r.get("info", {}).get("kind") == "replay"]
             generated_judge_rollouts = [
                 r for r in scored.judge_rollouts if r.get("info", {}).get("kind") == "generated"
             ]
@@ -665,6 +740,16 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 log_values["train/judge/metrics/reference_accuracy/mean"] = fmean(reference_judge_rewards)
             if judge_gate_state.accuracy_ema is not None:
                 log_values["train/judge/accuracy_ema"] = judge_gate_state.accuracy_ema
+            if replay_judge_rollouts:
+                # Accuracy on old generations is a direct forgetting meter.
+                log_values["train/judge/metrics/replay_accuracy/mean"] = fmean(
+                    float(r["reward"]) for r in replay_judge_rollouts
+                )
+                log_values["train/judge/metrics/replay_age/mean"] = fmean(
+                    float(step - r["info"]["replay_step"]) for r in replay_judge_rollouts
+                )
+            if replay_buffer is not None:
+                log_values["train/judge/metrics/replay_buffer_size"] = float(len(replay_buffer))
             if eval_config is not None and (step + 1) % eval_config.interval == 0:
                 eval_rollouts = await run_generator_eval(
                     generator,
