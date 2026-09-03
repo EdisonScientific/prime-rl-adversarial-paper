@@ -23,7 +23,7 @@ from prime_rl.trainer.model import setup_tokenizer
 from prime_rl.transports.batch import setup_batch_sender
 from prime_rl.transports.batch.types import TrainingSample
 from prime_rl.transports.weights import setup_weight_receiver
-from prime_rl.transports.weights.base import WeightReceiver
+from prime_rl.transports.weights.base import WeightReceiver, write_ema_clock
 from prime_rl.utils.config import cli
 from prime_rl.utils.logger import setup_logger
 from prime_rl.utils.pathing import get_broadcast_dir, get_rollout_dir, get_step_path
@@ -602,6 +602,9 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 step,
                 judge_accuracy,
             )
+            # The judge's EMA target advances on generator steps, not judge
+            # updates: gate skips accumulate into the next broadcast's blend.
+            write_ema_clock(judge.receiver.broadcast_dir, step + 1)
 
             # The trainer consumes the batch for its upcoming step: fresh trainer progress
             # starts at 1 and step N trains on rollouts/step_N, then broadcasts v_N.

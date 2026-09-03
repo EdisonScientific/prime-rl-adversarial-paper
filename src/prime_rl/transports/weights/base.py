@@ -26,6 +26,20 @@ RECEIVER_READY_MARKER = ".receiver_ready"
 STARTED_MARKER = ".started"
 FINISHED_MARKER = ".finished"
 
+# Step counter for the EMA target, written by the consumer's driver (e.g. the
+# adversarial orchestrator, once per generator step). It decouples the target's
+# convergence from the sender's broadcast cadence: a gated role that skipped k
+# steps folds them into one decay^k blend at its next broadcast — the weights
+# were frozen in between, so the result equals per-step blending.
+EMA_CLOCK_FILE = "ema_clock"
+
+
+def write_ema_clock(broadcast_dir: Path, step: int) -> None:
+    broadcast_dir.mkdir(parents=True, exist_ok=True)
+    tmp_file = broadcast_dir / (EMA_CLOCK_FILE + ".tmp")
+    tmp_file.write_text(str(step))
+    tmp_file.replace(broadcast_dir / EMA_CLOCK_FILE)
+
 
 def prune_broadcasts_beyond(output_dir: Path, step: int) -> None:
     """Remove broadcast dirs beyond ``step``. Resume hygiene, run by the
@@ -52,6 +66,7 @@ class WeightSender(ABC):
         self.timeout = timeout
         self.ema_decay = ema_decay
         self._shadow: list[torch.Tensor] | None = None
+        self._ema_clock: int | None = None
 
     @final
     def broadcast(self, model: nn.Module, step: int) -> None:
@@ -86,13 +101,26 @@ class WeightSender(ABC):
             return False
         with torch.no_grad():
             params = [param for param in model.parameters() if param.requires_grad]
+            elapsed = self._advance_ema_clock()
             if self._shadow is None:
                 self._shadow = [param.detach().clone() for param in params]
             else:
+                alpha = 1.0 - self.ema_decay**elapsed
                 for shadow, param in zip(self._shadow, params, strict=True):
-                    shadow.lerp_(param.detach(), 1.0 - self.ema_decay)
+                    shadow.lerp_(param.detach(), alpha)
         self._swap_shadow(model)
         return True
+
+    def _advance_ema_clock(self) -> int:
+        """Steps elapsed on the consumer-driven clock since the last broadcast;
+        1 when nobody writes the clock (broadcast cadence = step cadence)."""
+        clock_file = get_broadcast_dir(self.output_dir) / EMA_CLOCK_FILE
+        if not clock_file.is_file():
+            return 1
+        clock = int(clock_file.read_text())
+        elapsed = clock - self._ema_clock if self._ema_clock is not None else 1
+        self._ema_clock = clock
+        return max(1, elapsed)
 
     def _swap_shadow(self, model: nn.Module) -> None:
         assert self._shadow is not None
