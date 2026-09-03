@@ -71,7 +71,7 @@ type = "multi_node"
 gpus_per_node = 8
 num_train_nodes = 3
 num_infer_nodes = 1
-num_infer_replicas = 1
+num_infer_replicas = 2
 
 [judge.orchestrator]
 batch_size = 2048
