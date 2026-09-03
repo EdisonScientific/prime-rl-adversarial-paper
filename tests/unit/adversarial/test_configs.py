@@ -24,6 +24,7 @@ EXPERIMENTS = [
     ("smiles_to_formula", ["smiles_8b8b", "smiles_judgexexact"]),
     ("grant_abstract", ["grant_nih_32b235b_lora"]),
     ("grant_abstract", ["grant_nih_32b235b_genlora"]),
+    ("grant_abstract", ["grant_nih_32b235b_fullft"]),
     ("deslopify_abstract", ["deslopify_8b8b"]),
     ("deslopify_abstract", ["deslopify_8b8b", "deslopify_8b8b_lora"]),
     ("deslopify_abstract", ["deslopify_14b14b"]),

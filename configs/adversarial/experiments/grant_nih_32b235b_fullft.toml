@@ -1,0 +1,98 @@
+output_dir = "outputs/adversarial-grant-nih-32bgen-235bjudge-fullft"
+
+# Full-finetune rerun of the legacy 20260821 setting (b1024r16, jb2048,
+# kl 1e-3, both lrs 3e-7, gate 0.70/100) on the current stack. Deviations for
+# speed: completions cap at 3500 with a 1536 thinking budget instead of the
+# legacy 8192 unbudgeted, and the generator trains with IPO instead of the
+# legacy clip-high objective.
+
+[judge_update_gate]
+accuracy_threshold = 0.7
+max_skip_streak = 100
+
+[generator]
+max_steps = 3000
+seq_len = 8192
+
+[generator.model]
+name = "Qwen/Qwen3-32B"
+
+[generator.wandb]
+project = "grant_nih_v2"
+name = "grant-nih-32bgen-235bjudge-b1024r16-ipo-fullft-6nodes"
+
+[generator.trainer.loss]
+kl_tau = 0.001
+
+[generator.trainer.optim]
+lr = 3e-7
+
+[generator.weight_broadcast]
+type = "nccl"
+port = 29541
+# Cold model loads can exceed the default 1200s handshake window.
+timeout = 3600
+
+[generator.deployment]
+type = "multi_node"
+gpus_per_node = 8
+num_train_nodes = 1
+num_infer_nodes = 1
+
+[generator.orchestrator]
+batch_size = 1024
+rollouts_per_example = 16
+
+[generator.orchestrator.train.env]
+args = { task = "grant_abstract", kind = "generator", seed = 1, hf_dataset = "EdisonScientific/grant-abstracts-NIH-fy2026-sft", num_examples = 19995 }
+
+[generator.orchestrator.eval]
+interval = 100
+num_examples = -1
+
+[generator.orchestrator.train.sampling]
+max_completion_tokens = 3500
+extra_body = { top_k = -1, min_p = 0.0, chat_template_kwargs = { enable_thinking = true }, thinking_token_budget = 1536 }
+
+[generator.inference.vllm]
+tensor_parallel_size = 8
+# Prompts run ~300 tokens and completions cap at 3500; a tight ceiling frees
+# KV cache for more concurrent decodes.
+max_model_len = 5120
+# Auto-detection leaves hybrid Qwen3 models parserless, but thinking_token_budget
+# requires the server to track the reasoning block.
+reasoning_parser = "qwen3"
+
+[judge]
+max_steps = 3000
+seq_len = 4096
+
+[judge.model]
+name = "Qwen/Qwen3-235B-A22B"
+
+[judge.trainer.optim]
+lr = 3e-7
+
+[judge.weight_broadcast]
+type = "nccl"
+port = 29542
+# Cold model loads can exceed the default 1200s handshake window.
+timeout = 3600
+
+[judge.deployment]
+type = "multi_node"
+gpus_per_node = 8
+num_train_nodes = 3
+num_infer_nodes = 1
+num_infer_replicas = 2
+
+[judge.orchestrator]
+batch_size = 2048
+
+[judge.inference.vllm]
+# Judge steps are prefill-heavy (~3M tokens); bigger chunked-prefill bites cut the tail.
+max_num_batched_tokens = 32768
+# TP-4: at TP-8 the expert intermediate size shards below the CUTLASS MoE
+# kernel's 128-multiple requirement (the LoRA-judge variant dodges that kernel).
+tensor_parallel_size = 4
+max_model_len = 4096
