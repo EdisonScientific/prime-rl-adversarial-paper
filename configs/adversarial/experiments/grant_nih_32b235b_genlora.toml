@@ -41,6 +41,10 @@ rollouts_per_example = 16
 [generator.orchestrator.train.env]
 args = { task = "grant_abstract", kind = "generator", seed = 1, hf_dataset = "EdisonScientific/grant-abstracts-NIH-fy2026-sft", num_examples = 19995 }
 
+[generator.orchestrator.eval]
+interval = 100
+num_examples = -1
+
 [generator.orchestrator.train.sampling]
 max_completion_tokens = 3500
 extra_body = { top_k = -1, min_p = 0.0, chat_template_kwargs = { enable_thinking = true }, thinking_token_budget = 1536 }
