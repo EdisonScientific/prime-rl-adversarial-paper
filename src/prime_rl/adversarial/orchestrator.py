@@ -560,6 +560,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             await monitors.log(eval_log_values, step=0)
             logger.success(f"Step 0 eval | Eval reward: {eval_log_values['eval/generator/reward/mean']:.4f}")
 
+        pending_judge_update: asyncio.Task[None] | None = None
         for step in range(start_step, get_max_steps(config.generator)):
             step_start = time.perf_counter()
             offset = step * groups_per_step
@@ -570,6 +571,12 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 )
                 for example in batch_examples
             ]
+            # Generation only needs the generator weights, so the judge's slow
+            # broadcast from the previous step overlaps it; scoring is what
+            # requires the updated judge, and it starts after this await.
+            if pending_judge_update is not None:
+                await pending_judge_update
+                pending_judge_update = None
             scored = await score_and_build_judge_batch(
                 generator.env,
                 judge,
@@ -613,15 +620,14 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 send_tasks.append(send_role_batch(judge, scored.judge_rollouts, 1, judge.train_step + 1))
             await asyncio.gather(*send_tasks)
             step_path = get_step_path(get_rollout_dir(config.output_dir), step)
+            if not skip_judge_update:
+                pending_judge_update = asyncio.create_task(wait_and_update(judge, judge.train_step + 1))
+            generator_next_step = generator.train_step + 1
             await asyncio.gather(
+                wait_and_update(generator, generator_next_step),
                 asyncio.to_thread(save_rollouts, generator_rollouts, step_path / "generator_rollouts.jsonl"),
                 asyncio.to_thread(save_rollouts, scored.judge_rollouts, step_path / "judge_rollouts.jsonl"),
             )
-            generator_next_step = generator.train_step + 1
-            update_tasks = [wait_and_update(generator, generator_next_step)]
-            if not skip_judge_update:
-                update_tasks.append(wait_and_update(judge, judge.train_step + 1))
-            await asyncio.gather(*update_tasks)
 
             generator_completion_lens = [float(get_model_completion_len(r)) for r in generator_rollouts]
             judge_completion_lens = [float(get_model_completion_len(r)) for r in scored.judge_rollouts]
@@ -686,6 +692,9 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 + f"Judge acc: {log_values['train/judge/reward/mean']:.4f} | "
                 f"Judge skip: {int(skip_judge_update)}"
             )
+        # The judge trainer must not be stranded mid-handshake at max steps.
+        if pending_judge_update is not None:
+            await pending_judge_update
     finally:
         await monitors.finalize()
         if generator is not None:
