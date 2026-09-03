@@ -43,6 +43,20 @@ class JudgeUpdateGateConfig(BaseConfig):
     )
 
 
+class JudgeReplayConfig(BaseConfig):
+    fraction: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Replayed historical generations as a fraction of the current negatives. The judge batch "
+        "extends by the replayed samples plus as many of their references, keeping the class balance. 0 disables "
+        "replay.",
+    )
+    buffer_batches: int = Field(
+        200, ge=1, description="Sliding-window depth of the replay buffer, in generator batches."
+    )
+
+
 class AdversarialRoleConfig(BaseConfig):
     trainer: TrainerConfig = TrainerConfig()
     orchestrator: AdversarialOrchestratorConfig = AdversarialOrchestratorConfig()
@@ -197,6 +211,7 @@ class AdversarialRLConfig(BaseConfig):
         False, description="Resume both roles from the latest step where each has a trainer checkpoint."
     )
     judge_update_gate: JudgeUpdateGateConfig = JudgeUpdateGateConfig()
+    judge_replay: JudgeReplayConfig = JudgeReplayConfig()
     log: SharedLogConfig = SharedLogConfig()
 
     @model_validator(mode="after")
