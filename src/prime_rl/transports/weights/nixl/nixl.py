@@ -76,7 +76,7 @@ class NIXLWeightSender(WeightSender):
         config: NIXLWeightBroadcastConfig,
         parallel_dims: ParallelDims,
     ) -> None:
-        super().__init__(output_dir, config.timeout)
+        super().__init__(output_dir, config.timeout, config.ema_decay)
         self.config = config
         self.parallel_dims = parallel_dims
         if self.is_serving_rank:

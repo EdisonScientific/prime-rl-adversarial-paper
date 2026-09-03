@@ -138,6 +138,10 @@ class SharedInMemoryWeightBroadcastConfig(BaseConfig):
     timeout: int = 1200
     """Timeout in seconds for the broadcast handshake and transfer."""
 
+    ema_decay: Annotated[float, Field(gt=0.0, lt=1.0)] | None = None
+    """Broadcast a Polyak (EMA) average of the trainable weights instead of the
+    live ones, so the served model is a slow target that trails training."""
+
 
 class SharedNCCLWeightBroadcastConfig(SharedInMemoryWeightBroadcastConfig):
     type: Literal["nccl"] = "nccl"
@@ -167,6 +171,10 @@ class SharedFileSystemWeightBroadcastConfig(BaseConfig):
 
     timeout: int = 1200
     """Timeout in seconds for the broadcast handshake and transfer."""
+
+    ema_decay: Annotated[float, Field(gt=0.0, lt=1.0)] | None = None
+    """Broadcast a Polyak (EMA) average of the trainable weights instead of the
+    live ones, so the served model is a slow target that trails training."""
 
 
 SharedWeightBroadcastConfig: TypeAlias = Annotated[
@@ -484,6 +492,7 @@ class RLConfig(BaseConfig):
                 host=self.weight_broadcast.host,
                 port=self.weight_broadcast.port,
                 timeout=self.weight_broadcast.timeout,
+                ema_decay=self.weight_broadcast.ema_decay,
                 inference_world_size=inference_world_size,
             )
             if self.weight_broadcast.type == "nccl":
@@ -503,10 +512,10 @@ class RLConfig(BaseConfig):
             self.orchestrator.weight_broadcast = orchestrator_config_type(**common_config, **transport_config)
         elif self.weight_broadcast.type == "filesystem":
             self.trainer.weight_broadcast = TrainerFileSystemWeightBroadcastConfig(
-                timeout=self.weight_broadcast.timeout
+                timeout=self.weight_broadcast.timeout, ema_decay=self.weight_broadcast.ema_decay
             )
             self.orchestrator.weight_broadcast = OrchestratorFileSystemWeightBroadcastConfig(
-                timeout=self.weight_broadcast.timeout
+                timeout=self.weight_broadcast.timeout, ema_decay=self.weight_broadcast.ema_decay
             )
         if self.inference is not None:
             self.inference.weight_broadcast = InferenceWeightBroadcastConfig(type=self.weight_broadcast.type)

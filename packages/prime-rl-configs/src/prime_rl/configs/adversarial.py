@@ -133,14 +133,19 @@ class AdversarialRoleConfig(BaseConfig):
                 host=shared.host,
                 port=shared.port,
                 timeout=shared.timeout,
+                ema_decay=shared.ema_decay,
                 inference_world_size=inference_world_size,
                 quantize_in_weight_transfer=shared.quantize_in_weight_transfer,
             )
             self.trainer.weight_broadcast = TrainerNCCLWeightBroadcastConfig(**common)
             self.orchestrator.weight_broadcast = OrchestratorNCCLWeightBroadcastConfig(**common)
         elif shared.type == "filesystem":
-            self.trainer.weight_broadcast = TrainerFileSystemWeightBroadcastConfig(timeout=shared.timeout)
-            self.orchestrator.weight_broadcast = OrchestratorFileSystemWeightBroadcastConfig(timeout=shared.timeout)
+            self.trainer.weight_broadcast = TrainerFileSystemWeightBroadcastConfig(
+                timeout=shared.timeout, ema_decay=shared.ema_decay
+            )
+            self.orchestrator.weight_broadcast = OrchestratorFileSystemWeightBroadcastConfig(
+                timeout=shared.timeout, ema_decay=shared.ema_decay
+            )
         else:
             raise ValueError("adversarial roles support filesystem or nccl weight broadcast.")
         if self.inference is not None:

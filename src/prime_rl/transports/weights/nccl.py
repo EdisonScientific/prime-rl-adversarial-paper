@@ -172,7 +172,7 @@ class NCCLWeightSender(WeightSender):
         config: NCCLWeightBroadcastConfig,
         device: int | str | torch.device,
     ):
-        super().__init__(output_dir, config.timeout)
+        super().__init__(output_dir, config.timeout, config.ema_decay)
         self.nccl_broadcast_sender = NCCLBroadcaster(
             config.host,
             config.port,
