@@ -155,8 +155,14 @@ def apply_role_hosts(config: AdversarialRLConfig, allocation: dict[str, dict[str
 
         trainer_nodes = allocation[role]["trainer_nodes"]
         if run.trainer.weight_broadcast.type == "nccl":
+            trainer_host = trainer_nodes[0] if trainer_nodes else "localhost"
             run.trainer.weight_broadcast.host = "0.0.0.0"
-            run.orchestrator.weight_broadcast.host = trainer_nodes[0] if trainer_nodes else "localhost"
+            run.orchestrator.weight_broadcast.host = trainer_host
+            # The orchestrator subprocess re-parses the dumped config, and the
+            # shared-block validator re-derives the orchestrator's broadcast
+            # config from it — the host must survive that round trip.
+            if run.weight_broadcast is not None and run.weight_broadcast.type == "nccl":
+                run.weight_broadcast.host = trainer_host
 
 
 def write_configs(config: AdversarialRLConfig, config_dir: Path) -> None:
