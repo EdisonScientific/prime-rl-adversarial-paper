@@ -65,6 +65,7 @@ lr = 3e-7
 type = "nccl"
 port = 29542
 timeout = 3600
+ema_decay = 0.995
 
 [judge.deployment]
 type = "multi_node"
