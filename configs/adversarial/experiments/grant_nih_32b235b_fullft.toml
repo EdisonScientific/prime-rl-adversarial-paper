@@ -1,5 +1,9 @@
 output_dir = "outputs/adversarial-grant-nih-32bgen-235bjudge-fullft"
 
+[judge_replay]
+fraction = 0.5
+buffer_batches = 500
+
 [judge_update_gate]
 max_skip_streak = 50
 
@@ -12,10 +16,10 @@ name = "Qwen/Qwen3-32B"
 
 [generator.wandb]
 project = "grant_nih_v2"
-name = "grant-nih-32bgen-235bjudge-b1024r16-ipo-fullft-7nodes"
+name = "grant-nih-32bgen-235bjudge-b1024r16-ipo-fullft-kl1e2-ema0995-replay512w500-7nodes"
 
 [generator.trainer.loss]
-kl_tau = 0.05
+kl_tau = 0.01
 
 [generator.trainer.optim]
 lr = 2e-7
@@ -75,7 +79,7 @@ num_infer_nodes = 1
 num_infer_replicas = 1
 
 [judge.orchestrator]
-batch_size = 2048
+batch_size = 3072
 
 [judge.inference.vllm]
 max_num_batched_tokens = 32768

@@ -100,7 +100,9 @@ def require_config(config: AdversarialRLConfig) -> None:
     if gen.batch_size % gen.group_size != 0:
         raise ValueError("generator batch_size must be divisible by group_size.")
     pairwise = config.judge_objective == "pairwise"
-    max_judge_batch_size = gen.batch_size if pairwise else 2 * gen.batch_size
+    # Replay extends the judge batch beyond the per-step scoring calls.
+    replay_scale = 1.0 + config.judge_replay.fraction
+    max_judge_batch_size = int((gen.batch_size if pairwise else 2 * gen.batch_size) * replay_scale)
     if judge.batch_size > max_judge_batch_size:
         raise ValueError(
             f"judge batch_size must be at most {max_judge_batch_size} for judge_objective={config.judge_objective}."
@@ -615,6 +617,10 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             capacity = config.judge_replay.buffer_batches * config.generator.orchestrator.batch_size
             replay_buffer = ReplayBuffer(capacity)
             replay_rng = random.Random(config.generator.orchestrator.seed)
+            logger.info(
+                f"Judge replay active: {config.judge_replay.fraction:.2f} of the negatives from a "
+                f"{config.judge_replay.buffer_batches}-batch window (capacity {capacity} samples)"
+            )
             seeded = seed_replay_buffer(
                 replay_buffer,
                 get_rollout_dir(config.output_dir),
@@ -779,6 +785,11 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 )
                 + f"Judge acc: {log_values['train/judge/reward/mean']:.4f} | "
                 f"Judge skip: {int(skip_judge_update)}"
+                + (
+                    f" | Replay: {len(replay_judge_rollouts)} of {len(replay_buffer)} buffered"
+                    if replay_buffer is not None
+                    else ""
+                )
             )
         # The judge trainer must not be stranded mid-handshake at max steps.
         if pending_judge_update is not None:
