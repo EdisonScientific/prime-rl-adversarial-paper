@@ -121,6 +121,10 @@ def legacy_train_client(orch) -> vf.ClientConfig:
         client_type="renderer",
         api_base_url=client.base_url,
         api_key_var=client.api_key_var,
+        # The default read timeout is an hour: one wedged request stalls the
+        # whole step. Bound it above the longest legitimate rollout so dead
+        # requests fail into the existing retries instead.
+        timeout=420.0,
         max_connections=8192,
         max_keepalive_connections=8192,
         # Sticky DP-aware routing at the inference router.
