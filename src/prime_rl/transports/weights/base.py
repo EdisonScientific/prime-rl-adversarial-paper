@@ -41,6 +41,13 @@ def write_ema_clock(broadcast_dir: Path, step: int) -> None:
     tmp_file.replace(broadcast_dir / EMA_CLOCK_FILE)
 
 
+def read_ema_clock(broadcast_dir: Path) -> int | None:
+    clock_file = broadcast_dir / EMA_CLOCK_FILE
+    if not clock_file.is_file():
+        return None
+    return int(clock_file.read_text())
+
+
 def prune_broadcasts_beyond(output_dir: Path, step: int) -> None:
     """Remove broadcast dirs beyond ``step``. Resume hygiene, run by the
     trainer master before its startup broadcast: stale leftovers of a longer
@@ -120,10 +127,9 @@ class WeightSender(ABC):
     def _advance_ema_clock(self) -> int:
         """Steps elapsed on the consumer-driven clock since the last broadcast;
         1 when nobody writes the clock (broadcast cadence = step cadence)."""
-        clock_file = get_broadcast_dir(self.output_dir) / EMA_CLOCK_FILE
-        if not clock_file.is_file():
+        clock = read_ema_clock(get_broadcast_dir(self.output_dir))
+        if clock is None:
             return 1
-        clock = int(clock_file.read_text())
         elapsed = clock - self._ema_clock if self._ema_clock is not None else 1
         self._ema_clock = clock
         return max(1, elapsed)

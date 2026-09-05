@@ -10,6 +10,8 @@ from datetime import timedelta
 
 from prime_rl.trainer.models.layers.attn import substitute_ring_attn
 from prime_rl.transports.weights import prune_broadcasts_beyond, setup_weight_sender
+from prime_rl.transports.weights.base import read_ema_clock
+from prime_rl.utils.pathing import get_broadcast_dir
 from prime_rl.utils.act_offloading import maybe_activation_offloading
 import torch
 import torch.distributed as dist
@@ -268,6 +270,16 @@ def train(config: TrainerConfig):
         prof = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True).__enter__()
         maybe_record_function = record_function
     start_step = progress.step
+    # Boundary checkpoints follow the consumer-driven clock; all ranks must
+    # agree on the bucket, so the master reads the clock and broadcasts.
+    ckpt_boundary_interval = config.ckpt.boundary_interval if config.ckpt else None
+    ckpt_boundary_bucket = 0
+    if ckpt_boundary_interval:
+        bucket_holder = [None]
+        if world.is_master:
+            bucket_holder[0] = (read_ema_clock(get_broadcast_dir(config.output_dir)) or 0) // ckpt_boundary_interval
+        dist.broadcast_object_list(bucket_holder, src=0)
+        ckpt_boundary_bucket = bucket_holder[0]
     max_peak_memory = 0.0
     while True:
         # Reset peak memory stats
@@ -300,6 +312,26 @@ def train(config: TrainerConfig):
         dataloader.wait_for_batch()
         wait_for_batch_time = time.perf_counter() - wait_for_batch_start_time
         logger.debug(f"Waited for batch for {format_time(wait_for_batch_time)}")
+
+        # A gated role can idle across the driving loop's checkpoint boundaries.
+        # The weights are unchanged since the last finished step, so save that
+        # state now, labeled as the finished step, to match the boundary the
+        # orchestrator recorded.
+        if ckpt_boundary_interval and progress.step > start_step:
+            bucket_holder = [None]
+            if world.is_master:
+                bucket = (read_ema_clock(get_broadcast_dir(config.output_dir)) or 0) // ckpt_boundary_interval
+                bucket_holder[0] = bucket if bucket > ckpt_boundary_bucket else None
+            dist.broadcast_object_list(bucket_holder, src=0)
+            if bucket_holder[0] is not None:
+                ckpt_boundary_bucket = bucket_holder[0]
+                finished_step = progress.step - 1
+                if not ckpt_manager.get_ckpt_path(finished_step).exists():
+                    logger.info(f"Saving boundary checkpoint at step {finished_step}")
+                    progress.step = finished_step
+                    ckpt_manager.save(finished_step, model, [optimizer], scheduler, progress)
+                    progress.step = finished_step + 1
+                    ckpt_manager.maybe_clean()
 
         # Load the training batch
         logger.debug("Loading batch")

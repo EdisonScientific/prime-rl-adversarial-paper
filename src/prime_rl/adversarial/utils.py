@@ -1,3 +1,4 @@
+import json
 import re
 from collections.abc import Mapping
 from datetime import date, datetime
@@ -15,6 +16,52 @@ from prime_rl.utils.logger import get_logger
 from prime_rl.utils.pathing import get_all_ckpt_steps, get_ckpt_dir
 
 ANSWER_RE = re.compile(r"\s*<answer>(.*?)</answer>\s*\Z", re.DOTALL | re.IGNORECASE)
+
+
+SNAPSHOT_DIR = "orchestrator_state"
+
+
+def write_boundary_snapshot(
+    output_dir: Path, loop_step: int, judge_train_step: int, gate_accuracy_ema: float | None, gate_skip_streak: int
+) -> None:
+    """Record the loop-to-judge step mapping and gate state at a generator
+    checkpoint boundary, so a resume can pair the two roles' checkpoints."""
+    state_dir = output_dir / SNAPSHOT_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+    tmp = state_dir / f"step_{loop_step}.json.tmp"
+    tmp.write_text(
+        json.dumps(
+            {
+                "loop_step": loop_step,
+                "judge_train_step": judge_train_step,
+                "gate_accuracy_ema": gate_accuracy_ema,
+                "gate_skip_streak": gate_skip_streak,
+            }
+        )
+    )
+    tmp.replace(state_dir / f"step_{loop_step}.json")
+
+
+def resolve_resume_point(output_dir: Path, generator_output_dir: Path, judge_output_dir: Path) -> dict[str, Any]:
+    """Latest boundary snapshot backed by both roles' checkpoints. The judge
+    checkpoints on the same loop boundaries via ckpt.boundary_interval, labeled
+    with its own train step; the snapshot carries the pairing."""
+    snapshots = sorted(
+        (output_dir / SNAPSHOT_DIR).glob("step_*.json"),
+        key=lambda p: int(p.stem.split("_")[1]),
+        reverse=True,
+    )
+    generator_steps = set(get_all_ckpt_steps(get_ckpt_dir(generator_output_dir)))
+    judge_steps = set(get_all_ckpt_steps(get_ckpt_dir(judge_output_dir)))
+    for path in snapshots:
+        snapshot = json.loads(path.read_text())
+        if snapshot["loop_step"] in generator_steps and (
+            snapshot["judge_train_step"] == 0 or snapshot["judge_train_step"] in judge_steps
+        ):
+            return snapshot
+    raise ValueError(
+        f"No boundary snapshot under {output_dir / SNAPSHOT_DIR} is backed by checkpoints of both roles; cannot resume."
+    )
 
 
 def latest_common_ckpt_step(generator_output_dir: Path, judge_output_dir: Path) -> int:
