@@ -35,6 +35,10 @@ gpus_per_node = 8
 num_train_nodes = 2
 num_infer_nodes = 1
 
+[generator.trainer.ckpt]
+interval = 100
+keep_last = 1
+
 [generator.orchestrator]
 batch_size = 1024
 rollouts_per_example = 16
