@@ -15,7 +15,7 @@ from typing import Any
 import tomli_w
 
 import prime_rl._compat  # noqa: F401
-from prime_rl.adversarial.utils import latest_common_ckpt_step
+from prime_rl.adversarial.utils import resolve_resume_point
 from prime_rl.configs.adversarial import AdversarialRLConfig
 from prime_rl.configs.shared import ResumeConfig
 from prime_rl.entrypoints.rl import (
@@ -221,13 +221,18 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
         shutil.rmtree(config.output_dir)
 
     resume_step = -1
+    judge_resume_step = -1
     if config.resume:
-        resume_step = latest_common_ckpt_step(config.generator.output_dir, config.judge.output_dir)
-        logger.info(f"Resuming both roles from checkpoint step {resume_step}")
-        for role_config in (config.generator, config.judge):
-            role_config.trainer.resume = ResumeConfig(step=resume_step)
+        snapshot = resolve_resume_point(config.output_dir, config.generator.output_dir, config.judge.output_dir)
+        resume_step = snapshot["loop_step"]
+        judge_resume_step = snapshot["judge_train_step"]
+        logger.info(f"Resuming from loop step {resume_step} (judge train step {judge_resume_step})")
+        config.generator.trainer.resume = ResumeConfig(step=resume_step)
+        # A judge with no update yet restarts fresh from the pretrained weights.
+        if judge_resume_step > 0:
+            config.judge.trainer.resume = ResumeConfig(step=judge_resume_step)
 
-    for role_config in (config.generator, config.judge):
+    for role_config, role_resume_step in ((config.generator, resume_step), (config.judge, judge_resume_step)):
         validate_run_dir(
             role_config.output_dir,
             output_dir=config.output_dir,
@@ -235,7 +240,7 @@ def adversarial_rl(config: AdversarialRLConfig) -> None:
             clean=config.clean_output_dir or role_config.clean,
         )
         role_config.output_dir.mkdir(parents=True, exist_ok=True)
-        clean_future_steps(role_config.output_dir, resume_step)
+        clean_future_steps(role_config.output_dir, role_resume_step)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     # The orchestrator and the generator trainer share one W&B run. The judge

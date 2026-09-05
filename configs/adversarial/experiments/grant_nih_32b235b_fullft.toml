@@ -46,6 +46,9 @@ args = { task = "grant_abstract", kind = "generator", seed = 1, hf_dataset = "Ed
 interval = 100
 num_examples = -1
 
+[generator.orchestrator.train]
+max_retries = 8
+
 [generator.orchestrator.train.sampling]
 max_completion_tokens = 4096
 extra_body = { top_k = -1, min_p = 0.0, chat_template_kwargs = { enable_thinking = true }, thinking_token_budget = 1536 }
@@ -80,6 +83,14 @@ num_infer_replicas = 1
 
 [judge.orchestrator]
 batch_size = 3072
+
+[judge.orchestrator.train]
+max_retries = 8
+
+[judge.trainer.ckpt]
+interval = 100
+boundary_interval = 100
+keep_last = 1
 
 [judge.inference.vllm]
 max_num_batched_tokens = 32768

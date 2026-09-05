@@ -518,6 +518,11 @@ class CheckpointConfig(BaseConfig):
     interval: int | None = Field(None, ge=1)
     """Interval at which to save the training checkpoint. If None, only checkpoints at the end of training."""
 
+    boundary_interval: int | None = Field(None, ge=1)
+    """Also checkpoint whenever the consumer-driven broadcast clock crosses a multiple of this many clock
+    steps. Keeps a gated role's checkpoints aligned with the driving loop (the adversarial judge trains on a
+    subset of generator steps, but must be resumable wherever the generator checkpoints)."""
+
     keep_last: int | None = Field(None, ge=1)
     """Keep at most this many recent step checkpoints on disk. If None, never clean old checkpoints based on recency."""
 

@@ -14,9 +14,10 @@ from prime_rl.adversarial.replay import ReplayBuffer, ReplayItem, seed_replay_bu
 from prime_rl.adversarial.utils import (
     backfill_rollout_tokens,
     get_model_completion_len,
-    latest_common_ckpt_step,
+    resolve_resume_point,
     rollout_to_sample,
     save_rollouts,
+    write_boundary_snapshot,
 )
 from prime_rl.configs.adversarial import AdversarialRLConfig, AdversarialRoleConfig
 from prime_rl.orchestrator.clients import AdminClients
@@ -560,14 +561,21 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
         generator = await setup_role("generator", config.generator)
         judge = await setup_role("judge", config.judge)
         start_step = 0
+        judge_start_step = 0
+        resume_snapshot: dict[str, Any] | None = None
         if config.resume:
-            start_step = latest_common_ckpt_step(config.generator.output_dir, config.judge.output_dir)
-            logger.info(f"Resuming generator and judge from checkpoint step {start_step}")
-        # The trainers offer their startup weights (v{start_step}) and block
-        # until each role's receiver acknowledges and joins the transfer.
+            resume_snapshot = resolve_resume_point(
+                config.output_dir, config.generator.output_dir, config.judge.output_dir
+            )
+            start_step = resume_snapshot["loop_step"]
+            judge_start_step = resume_snapshot["judge_train_step"]
+            logger.info(f"Resuming from loop step {start_step} (judge train step {judge_start_step})")
+        # The trainers offer their startup weights and block until each role's
+        # receiver acknowledges and joins the transfer. The two roles resume
+        # from their own counters, paired by the boundary snapshot.
         await asyncio.gather(
             wait_and_update(generator, start_step),
-            wait_and_update(judge, start_step),
+            wait_and_update(judge, judge_start_step),
         )
         examples = list(generator.env.get_dataset(seed=config.generator.orchestrator.seed))
         if not examples:
@@ -584,6 +592,9 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             )
 
         judge_gate_state = JudgeUpdateGateState()
+        if resume_snapshot is not None:
+            judge_gate_state.accuracy_ema = resume_snapshot["gate_accuracy_ema"]
+            judge_gate_state.skip_streak = resume_snapshot["gate_skip_streak"]
         group_size = config.generator.orchestrator.group_size
         batch_size = config.generator.orchestrator.batch_size
         groups_per_step = batch_size // group_size
@@ -700,6 +711,19 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             # The judge's EMA target advances on generator steps, not judge
             # updates: gate skips accumulate into the next broadcast's blend.
             write_ema_clock(judge.receiver.broadcast_dir, step + 1)
+            # At generator checkpoint boundaries, record the pairing the judge's
+            # boundary checkpoint will match, plus the gate state, for resume.
+            gen_ckpt_interval = (
+                config.generator.trainer.ckpt.interval if config.generator.trainer.ckpt is not None else None
+            )
+            if gen_ckpt_interval and (step + 1) % gen_ckpt_interval == 0:
+                write_boundary_snapshot(
+                    config.output_dir,
+                    loop_step=step + 1,
+                    judge_train_step=judge.train_step + (0 if skip_judge_update else 1),
+                    gate_accuracy_ema=judge_gate_state.accuracy_ema,
+                    gate_skip_streak=judge_gate_state.skip_streak,
+                )
 
             # The trainer consumes the batch for its upcoming step: fresh trainer progress
             # starts at 1 and step N trains on rollouts/step_N, then broadcasts v_N.
