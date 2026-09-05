@@ -277,7 +277,8 @@ def train(config: TrainerConfig):
     if ckpt_boundary_interval:
         bucket_holder = [None]
         if world.is_master:
-            bucket_holder[0] = (read_ema_clock(get_broadcast_dir(config.output_dir)) or 0) // ckpt_boundary_interval
+            # The clock marks the loop step now starting; step B completes at clock B+1.
+            bucket_holder[0] = max(0, (read_ema_clock(get_broadcast_dir(config.output_dir)) or 1) - 1) // ckpt_boundary_interval
         dist.broadcast_object_list(bucket_holder, src=0)
         ckpt_boundary_bucket = bucket_holder[0]
     max_peak_memory = 0.0
@@ -320,7 +321,7 @@ def train(config: TrainerConfig):
         if ckpt_boundary_interval and progress.step > start_step:
             bucket_holder = [None]
             if world.is_master:
-                bucket = (read_ema_clock(get_broadcast_dir(config.output_dir)) or 0) // ckpt_boundary_interval
+                bucket = max(0, (read_ema_clock(get_broadcast_dir(config.output_dir)) or 1) - 1) // ckpt_boundary_interval
                 bucket_holder[0] = bucket if bucket > ckpt_boundary_bucket else None
             dist.broadcast_object_list(bucket_holder, src=0)
             if bucket_holder[0] is not None:

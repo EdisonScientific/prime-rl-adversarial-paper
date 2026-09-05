@@ -37,7 +37,7 @@ num_infer_nodes = 1
 
 [generator.trainer.ckpt]
 interval = 100
-keep_last = 1
+keep_last = 2
 
 [generator.orchestrator]
 batch_size = 1024
