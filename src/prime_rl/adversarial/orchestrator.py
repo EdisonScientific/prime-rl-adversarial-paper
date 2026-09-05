@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import random
 import time
 from dataclasses import dataclass
@@ -32,6 +33,21 @@ from prime_rl.utils.logger import setup_logger
 from prime_rl.utils.pathing import get_broadcast_dir, get_rollout_dir, get_step_path
 from prime_rl.utils.process import set_proc_title
 from prime_rl.utils.utils import clean_exit
+
+# The rollout retry filter in verifiers treats router circuit-breaker failures
+# (ModelError -> InternalServerError) as non-retryable, so one breaker flap
+# drops every affected call regardless of max_retries. Widen the filter to all
+# model errors; the wrapper's exponential backoff rides out the breaker window.
+_vf_environment = importlib.import_module("verifiers.legacy.envs.environment")
+_maybe_retry = _vf_environment.maybe_retry
+
+
+def _retry_model_errors(func, max_retries=0, **kwargs):
+    kwargs.setdefault("error_types", (vf.InfraError, vf.ModelError))
+    return _maybe_retry(func, max_retries=max_retries, **kwargs)
+
+
+_vf_environment.maybe_retry = _retry_model_errors
 
 STATE_COLUMNS = ["trajectory"]
 
