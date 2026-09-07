@@ -9,6 +9,8 @@ from typing import final
 import torch
 import torch.nn as nn
 from httpx import AsyncClient
+from torch.distributed.checkpoint.state_dict_loader import load as dcp_load
+from torch.distributed.checkpoint.state_dict_saver import save as dcp_save
 
 from prime_rl.configs.trainer import WeightBroadcastConfig
 from prime_rl.trainer.world import get_world
@@ -122,6 +124,27 @@ class WeightSender(ABC):
                         f"EMA target absorbed {elapsed} clock step(s) toward the learner (alpha={alpha:.4f})"
                     )
         self._swap_shadow(model)
+        return True
+
+    def save_shadow(self, ckpt_path: Path) -> None:
+        """Persist the EMA target alongside the trainer checkpoint (bf16, sharded
+        like the model) so a resume restores the target instead of re-seeding it."""
+        if self._shadow is None:
+            return
+        state = {str(i): t.to(torch.bfloat16) for i, t in enumerate(self._shadow)}
+        dcp_save(state, checkpoint_id=ckpt_path / "ema_shadow")
+
+    def load_shadow(self, ckpt_path: Path, model: nn.Module) -> bool:
+        shadow_path = ckpt_path / "ema_shadow"
+        if self.ema_decay is None or not (shadow_path / ".metadata").is_file():
+            return False
+        with torch.no_grad():
+            params = [param for param in model.parameters() if param.requires_grad]
+            state = {str(i): param.detach().clone().to(torch.bfloat16) for i, param in enumerate(params)}
+            dcp_load(state, checkpoint_id=shadow_path)
+            self._shadow = [state[str(i)].to(params[i].dtype) for i in range(len(params))]
+        if self.world.is_master:
+            self.logger.info(f"Restored the EMA target shadow from {shadow_path} ({len(self._shadow)} tensors)")
         return True
 
     def _advance_ema_clock(self) -> int:

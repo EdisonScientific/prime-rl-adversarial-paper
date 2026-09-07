@@ -236,6 +236,9 @@ def train(config: TrainerConfig):
             progress,
             path=resume_dir / "trainer" if resume_dir is not None else None,
         )
+        if weight_sender is not None:
+            shadow_dir = resume_dir / "trainer" if resume_dir is not None else ckpt_manager.get_ckpt_path(checkpoint_step)
+            weight_sender.load_shadow(shadow_dir, model)
         # The checkpoint finished step ``checkpoint_step``; resume training at the next step.
         progress.step += 1
         logger.info(
@@ -332,6 +335,8 @@ def train(config: TrainerConfig):
                     progress.step = finished_step
                     ckpt_manager.save(finished_step, model, [optimizer], scheduler, progress)
                     progress.step = finished_step + 1
+                    if weight_sender is not None:
+                        weight_sender.save_shadow(ckpt_manager.get_ckpt_path(finished_step))
                     ckpt_manager.maybe_clean()
 
         # Load the training batch
@@ -651,6 +656,8 @@ def train(config: TrainerConfig):
             logger.info(f"Saving checkpoint at step {progress.step}")
             save_ckpt_start_time = time.perf_counter()
             ckpt_manager.save(progress.step, model, [optimizer], scheduler, progress)
+            if weight_sender is not None:
+                weight_sender.save_shadow(ckpt_manager.get_ckpt_path(progress.step))
             save_ckpt_time = time.perf_counter() - save_ckpt_start_time
 
             ckpt_manager.maybe_clean()
@@ -770,6 +777,8 @@ def train(config: TrainerConfig):
     if config.ckpt is not None:
         logger.info(f"Saving final checkpoint at step {progress.step}")
         ckpt_manager.save(progress.step, model, [optimizer], scheduler, progress)
+        if weight_sender is not None:
+            weight_sender.save_shadow(ckpt_manager.get_ckpt_path(progress.step))
         ckpt_manager.maybe_clean()
 
     if gradient_manager is not None:
