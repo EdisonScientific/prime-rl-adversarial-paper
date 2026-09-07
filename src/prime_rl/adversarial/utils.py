@@ -13,7 +13,7 @@ from renderers.base import build_trajectory_step
 from prime_rl.transports.batch.types import TrainingSample
 from prime_rl.utils.chat_template import deserialize_tool_calls, normalize_messages
 from prime_rl.utils.logger import get_logger
-from prime_rl.utils.pathing import get_all_ckpt_steps, get_ckpt_dir
+from prime_rl.utils.pathing import get_all_ckpt_steps, get_ckpt_dir, get_step_path
 
 ANSWER_RE = re.compile(r"\s*<answer>(.*?)</answer>\s*\Z", re.DOTALL | re.IGNORECASE)
 
@@ -42,6 +42,17 @@ def write_boundary_snapshot(
     tmp.replace(state_dir / f"step_{loop_step}.json")
 
 
+def complete_ckpt_steps(role_output_dir: Path) -> set[int]:
+    """Checkpoint steps whose DCP save finished. DCP writes ``.metadata`` last,
+    so a step directory without it is a save that a crash cut short."""
+    ckpt_dir = get_ckpt_dir(role_output_dir)
+    return {
+        step
+        for step in get_all_ckpt_steps(ckpt_dir)
+        if (get_step_path(ckpt_dir, step) / "trainer" / ".metadata").is_file()
+    }
+
+
 def resolve_resume_point(output_dir: Path, generator_output_dir: Path, judge_output_dir: Path) -> dict[str, Any]:
     """Latest boundary snapshot backed by both roles' checkpoints. The judge
     checkpoints on the same loop boundaries via ckpt.boundary_interval, labeled
@@ -51,8 +62,8 @@ def resolve_resume_point(output_dir: Path, generator_output_dir: Path, judge_out
         key=lambda p: int(p.stem.split("_")[1]),
         reverse=True,
     )
-    generator_steps = set(get_all_ckpt_steps(get_ckpt_dir(generator_output_dir)))
-    judge_steps = set(get_all_ckpt_steps(get_ckpt_dir(judge_output_dir)))
+    generator_steps = complete_ckpt_steps(generator_output_dir)
+    judge_steps = complete_ckpt_steps(judge_output_dir)
     for path in snapshots:
         snapshot = json.loads(path.read_text())
         if snapshot["loop_step"] not in generator_steps:
@@ -77,21 +88,6 @@ def resolve_resume_point(output_dir: Path, generator_output_dir: Path, judge_out
     raise ValueError(
         f"No boundary snapshot under {output_dir / SNAPSHOT_DIR} is backed by checkpoints of both roles; cannot resume."
     )
-
-
-def latest_common_ckpt_step(generator_output_dir: Path, judge_output_dir: Path) -> int:
-    """Latest step at which both roles have a trainer checkpoint. Both trainers
-    train every step (checkpoint steps equal loop steps) unless the judge
-    update gate skipped an update before the crash. In that case their counters
-    have diverged and the run cannot be resumed consistently."""
-    common_steps = set(get_all_ckpt_steps(get_ckpt_dir(generator_output_dir))) & set(
-        get_all_ckpt_steps(get_ckpt_dir(judge_output_dir))
-    )
-    if not common_steps:
-        raise ValueError(
-            f"No common checkpoint step under {generator_output_dir} and {judge_output_dir}; cannot resume."
-        )
-    return max(common_steps)
 
 
 def completion_text(completion: Any) -> str:
