@@ -55,10 +55,20 @@ def resolve_resume_point(output_dir: Path, generator_output_dir: Path, judge_out
     judge_steps = set(get_all_ckpt_steps(get_ckpt_dir(judge_output_dir)))
     for path in snapshots:
         snapshot = json.loads(path.read_text())
-        if snapshot["loop_step"] in generator_steps and (
-            snapshot["judge_train_step"] == 0 or snapshot["judge_train_step"] in judge_steps
-        ):
+        if snapshot["loop_step"] not in generator_steps:
+            continue
+        if snapshot["judge_train_step"] == 0 or snapshot["judge_train_step"] in judge_steps:
             return snapshot
+        # No exact judge checkpoint (e.g. an own-interval save evicted the
+        # boundary one): fall back to the newest earlier judge checkpoint. The
+        # judge resumes slightly stale, which it retrains away within steps.
+        fallback = max((s for s in judge_steps if s <= snapshot["judge_train_step"]), default=None)
+        if fallback is not None:
+            get_logger().warning(
+                f"Boundary snapshot {snapshot['loop_step']} pairs with judge step "
+                f"{snapshot['judge_train_step']}, which has no checkpoint; resuming the judge from {fallback}."
+            )
+            return {**snapshot, "judge_train_step": fallback}
     raise ValueError(
         f"No boundary snapshot under {output_dir / SNAPSHOT_DIR} is backed by checkpoints of both roles; cannot resume."
     )

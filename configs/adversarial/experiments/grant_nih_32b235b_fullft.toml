@@ -98,7 +98,7 @@ batch_size = 3072
 max_retries = 8
 
 [judge.trainer.ckpt]
-interval = 100
+interval = 100000
 boundary_interval = 100
 keep_last = 1
 
