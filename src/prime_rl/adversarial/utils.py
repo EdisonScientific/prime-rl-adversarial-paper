@@ -63,6 +63,11 @@ def resolve_resume_point(output_dir: Path, generator_output_dir: Path, judge_out
         # boundary one): fall back to the newest earlier judge checkpoint. The
         # judge resumes slightly stale, which it retrains away within steps.
         fallback = max((s for s in judge_steps if s <= snapshot["judge_train_step"]), default=None)
+        if fallback is None:
+            # Last resort: a newer judge checkpoint (an own-interval save may
+            # have evicted every boundary one). The judge resumes a few updates
+            # ahead of the loop, which the game re-equilibrates within steps.
+            fallback = min((s for s in judge_steps if s > snapshot["judge_train_step"]), default=None)
         if fallback is not None:
             get_logger().warning(
                 f"Boundary snapshot {snapshot['loop_step']} pairs with judge step "
