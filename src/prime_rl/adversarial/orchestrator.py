@@ -586,6 +586,29 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             start_step = resume_snapshot["loop_step"]
             judge_start_step = resume_snapshot["judge_train_step"]
             logger.info(f"Resuming from loop step {start_step} (judge train step {judge_start_step})")
+        # Seed the judge replay buffer from saved rollouts while the trainers
+        # load their checkpoints; neither side depends on the other.
+        replay_buffer: ReplayBuffer | None = None
+        replay_rng: random.Random | None = None
+        seed_task: asyncio.Task[int] | None = None
+        if config.judge_replay.fraction > 0.0:
+            capacity = config.judge_replay.buffer_batches * config.generator.orchestrator.batch_size
+            replay_buffer = ReplayBuffer(capacity)
+            replay_rng = random.Random(config.generator.orchestrator.seed)
+            logger.info(
+                f"Judge replay active: {config.judge_replay.fraction:.2f} of the negatives from a "
+                f"{config.judge_replay.buffer_batches}-batch window (capacity {capacity} samples)"
+            )
+            seed_task = asyncio.create_task(
+                asyncio.to_thread(
+                    seed_replay_buffer,
+                    replay_buffer,
+                    get_rollout_dir(config.output_dir),
+                    generator.env,
+                    start_step,
+                    config.judge_replay.buffer_batches,
+                )
+            )
         # The trainers offer their startup weights and block until each role's
         # receiver acknowledges and joins the transfer. The two roles resume
         # from their own counters, paired by the boundary snapshot.
@@ -642,23 +665,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             await monitors.log(eval_log_values, step=0)
             logger.success(f"Step 0 eval | Eval reward: {eval_log_values['eval/generator/reward/mean']:.4f}")
 
-        replay_buffer: ReplayBuffer | None = None
-        replay_rng: random.Random | None = None
-        if config.judge_replay.fraction > 0.0:
-            capacity = config.judge_replay.buffer_batches * config.generator.orchestrator.batch_size
-            replay_buffer = ReplayBuffer(capacity)
-            replay_rng = random.Random(config.generator.orchestrator.seed)
-            logger.info(
-                f"Judge replay active: {config.judge_replay.fraction:.2f} of the negatives from a "
-                f"{config.judge_replay.buffer_batches}-batch window (capacity {capacity} samples)"
-            )
-            seeded = seed_replay_buffer(
-                replay_buffer,
-                get_rollout_dir(config.output_dir),
-                generator.env,
-                start_step,
-                config.judge_replay.buffer_batches,
-            )
+        if seed_task is not None:
+            seeded = await seed_task
             if seeded:
                 logger.info(f"Seeded the judge replay buffer with {seeded} samples from saved rollouts")
 
