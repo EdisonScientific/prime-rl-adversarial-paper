@@ -30,7 +30,7 @@ lr = 2e-7
 [generator.weight_broadcast]
 type = "nccl"
 port = 29541
-timeout = 3600
+timeout = 7200
 
 [generator.deployment]
 type = "multi_node"
@@ -81,7 +81,7 @@ lr = 3e-7
 [judge.weight_broadcast]
 type = "nccl"
 port = 29542
-timeout = 3600
+timeout = 7200
 ema_decay = 0.995
 
 [judge.deployment]
