@@ -18,6 +18,9 @@ name = "Qwen/Qwen3-32B"
 project = "grant_nih_v2"
 name = "grant-nih-32bgen-235bjudge-b1024r16-ipo-fullft-kl1e2-noema-replay512w500-7nodes"
 
+[generator.trainer]
+dist_timeout_seconds = 7200
+
 [generator.trainer.loss]
 kl_tau = 0.01
 
@@ -68,6 +71,9 @@ seq_len = 4096
 
 [judge.model]
 name = "Qwen/Qwen3-235B-A22B"
+
+[judge.trainer]
+dist_timeout_seconds = 7200
 
 [judge.trainer.optim]
 lr = 3e-7
