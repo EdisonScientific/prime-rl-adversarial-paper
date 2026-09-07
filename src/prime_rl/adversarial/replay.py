@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from prime_rl.utils.logger import get_logger
 from prime_rl.utils.pathing import get_all_ckpt_steps, get_step_path
 
 
@@ -49,12 +50,18 @@ def seed_replay_buffer(buffer: ReplayBuffer, rollout_dir: Path, env: Any, before
         return 0
     steps = sorted(s for s in get_all_ckpt_steps(rollout_dir) if s < before_step)[-batches:]
     added = 0
+    skipped = 0
     for step in steps:
         path = get_step_path(rollout_dir, step) / "generator_rollouts.jsonl"
         if not path.is_file():
             continue
         for line in path.read_text().splitlines():
-            row = json.loads(line)
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                # Crash-truncated rollout files are expected on resume
+                skipped += 1
+                continue
             info = row.get("info") or {}
             question = info.get("question") or (row.get("prompt") or [{}])[-1].get("content")
             reference = info.get("reference") or row.get("answer")
@@ -62,4 +69,6 @@ def seed_replay_buffer(buffer: ReplayBuffer, rollout_dir: Path, env: Any, before
             if question and reference and candidate:
                 buffer.add(ReplayItem(question=question, candidate=candidate, reference=reference, step=step))
                 added += 1
+    if skipped:
+        get_logger().warning(f"Skipped {skipped} unparseable rollout lines while seeding the replay buffer")
     return added
