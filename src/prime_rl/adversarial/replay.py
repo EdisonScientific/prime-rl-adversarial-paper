@@ -2,11 +2,12 @@
 # alongside the current batch, so previously beaten generator strategies stay
 # in its training distribution instead of being forgotten and rediscovered.
 
-import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import orjson
 
 from prime_rl.utils.logger import get_logger
 from prime_rl.utils.pathing import get_all_ckpt_steps, get_step_path
@@ -55,10 +56,10 @@ def seed_replay_buffer(buffer: ReplayBuffer, rollout_dir: Path, env: Any, before
         path = get_step_path(rollout_dir, step) / "generator_rollouts.jsonl"
         if not path.is_file():
             continue
-        for line in path.read_text().splitlines():
+        for line in path.read_bytes().splitlines():
             try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
+                row = orjson.loads(line)
+            except orjson.JSONDecodeError:
                 # Crash-truncated rollout files are expected on resume
                 skipped += 1
                 continue
