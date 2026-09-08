@@ -9,6 +9,7 @@ from typing import final
 import torch
 import torch.nn as nn
 from httpx import AsyncClient
+from torch.distributed.checkpoint.filesystem import FileSystemWriter
 from torch.distributed.checkpoint.state_dict_loader import load as dcp_load
 from torch.distributed.checkpoint.state_dict_saver import save as dcp_save
 
@@ -126,13 +127,13 @@ class WeightSender(ABC):
         self._swap_shadow(model)
         return True
 
-    def save_shadow(self, ckpt_path: Path) -> None:
+    def save_shadow(self, ckpt_path: Path, threads: int = 1) -> None:
         """Persist the EMA target alongside the trainer checkpoint (bf16, sharded
         like the model) so a resume restores the target instead of re-seeding it."""
         if self._shadow is None:
             return
         state = {str(i): t.to(torch.bfloat16) for i, t in enumerate(self._shadow)}
-        dcp_save(state, checkpoint_id=ckpt_path / "ema_shadow")
+        dcp_save(state, storage_writer=FileSystemWriter(ckpt_path / "ema_shadow", thread_count=threads))
 
     def load_shadow(self, ckpt_path: Path, model: nn.Module) -> bool:
         shadow_path = ckpt_path / "ema_shadow"
