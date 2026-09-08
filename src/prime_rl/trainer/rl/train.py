@@ -336,7 +336,7 @@ def train(config: TrainerConfig):
                     ckpt_manager.save(finished_step, model, [optimizer], scheduler, progress)
                     progress.step = finished_step + 1
                     if weight_sender is not None:
-                        weight_sender.save_shadow(ckpt_manager.get_ckpt_path(finished_step))
+                        weight_sender.save_shadow(ckpt_manager.get_ckpt_path(finished_step), threads=config.ckpt.save_threads)
                     ckpt_manager.maybe_clean()
 
         # Load the training batch
@@ -657,7 +657,7 @@ def train(config: TrainerConfig):
             save_ckpt_start_time = time.perf_counter()
             ckpt_manager.save(progress.step, model, [optimizer], scheduler, progress)
             if weight_sender is not None:
-                weight_sender.save_shadow(ckpt_manager.get_ckpt_path(progress.step))
+                weight_sender.save_shadow(ckpt_manager.get_ckpt_path(progress.step), threads=config.ckpt.save_threads)
             save_ckpt_time = time.perf_counter() - save_ckpt_start_time
 
             ckpt_manager.maybe_clean()
@@ -778,7 +778,7 @@ def train(config: TrainerConfig):
         logger.info(f"Saving final checkpoint at step {progress.step}")
         ckpt_manager.save(progress.step, model, [optimizer], scheduler, progress)
         if weight_sender is not None:
-            weight_sender.save_shadow(ckpt_manager.get_ckpt_path(progress.step))
+            weight_sender.save_shadow(ckpt_manager.get_ckpt_path(progress.step), threads=config.ckpt.save_threads)
         ckpt_manager.maybe_clean()
 
     if gradient_manager is not None:

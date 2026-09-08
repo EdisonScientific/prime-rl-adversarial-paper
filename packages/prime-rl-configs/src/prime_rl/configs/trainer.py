@@ -523,6 +523,11 @@ class CheckpointConfig(BaseConfig):
     steps. Keeps a gated role's checkpoints aligned with the driving loop (the adversarial judge trains on a
     subset of generator steps, but must be resumable wherever the generator checkpoints)."""
 
+    save_threads: int = Field(1, ge=1)
+    """Write threads per rank for the DCP checkpoint save (``FileSystemWriter(thread_count=...)``). The torch
+    default of 1 relies on world size for write parallelism. Raise it when the trainer world is small relative
+    to the checkpoint and the filesystem scales with parallel streams (a 235B judge on 3 nodes writing to EFS)."""
+
     keep_last: int | None = Field(None, ge=1)
     """Keep at most this many recent step checkpoints on disk. If None, never clean old checkpoints based on recency."""
 
