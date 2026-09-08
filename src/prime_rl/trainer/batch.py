@@ -210,34 +210,49 @@ def _partition_loads(weights: Sequence[int], partitions: list[list[int]]) -> lis
     return [sum(weights[i] for i in partition) for partition in partitions]
 
 
+# Each pass scans O(n^2) candidate swaps and applies one, so unbounded passes
+# grind for hours on large batches with adversarial length distributions. The
+# Karmarkar-Karp seed is near-optimal already; a bounded refinement is a
+# strictly time-limited polish.
+_MAX_REFINE_PASSES = 16
+
+
 def _refine_by_swapping(weights: Sequence[int], partitions: list[list[int]]) -> list[list[int]]:
     partitions = [list(partition) for partition in partitions]
     loads = _partition_loads(weights, partitions)
 
-    while True:
+    for _ in range(_MAX_REFINE_PASSES):
         best_swap = None
         best_score = (max(loads), max(loads) - min(loads))
         for left_rank in range(len(partitions)):
             for right_rank in range(left_rank + 1, len(partitions)):
+                # max/min over the loads that this pair of ranks cannot change
+                other_loads = [load for rank, load in enumerate(loads) if rank not in (left_rank, right_rank)]
+                others_max = max(other_loads, default=0)
+                others_min = min(other_loads, default=float("inf"))
+                left_load, right_load = loads[left_rank], loads[right_rank]
                 for left_pos, left_idx in enumerate(partitions[left_rank]):
+                    left_weight = weights[left_idx]
                     for right_pos, right_idx in enumerate(partitions[right_rank]):
-                        new_left = loads[left_rank] - weights[left_idx] + weights[right_idx]
-                        new_right = loads[right_rank] - weights[right_idx] + weights[left_idx]
-                        new_loads = list(loads)
-                        new_loads[left_rank] = new_left
-                        new_loads[right_rank] = new_right
-                        score = (max(new_loads), max(new_loads) - min(new_loads))
+                        delta = weights[right_idx] - left_weight
+                        new_left = left_load + delta
+                        new_right = right_load - delta
+                        high = max(others_max, new_left, new_right)
+                        low = min(others_min, new_left, new_right)
+                        score = (high, high - low)
                         if score < best_score:
                             best_score = score
-                            best_swap = (left_rank, right_rank, left_pos, right_pos, new_loads)
+                            best_swap = (left_rank, right_rank, left_pos, right_pos, new_left, new_right)
         if best_swap is None:
             return partitions
 
-        left_rank, right_rank, left_pos, right_pos, loads = best_swap
+        left_rank, right_rank, left_pos, right_pos, new_left, new_right = best_swap
+        loads[left_rank], loads[right_rank] = new_left, new_right
         partitions[left_rank][left_pos], partitions[right_rank][right_pos] = (
             partitions[right_rank][right_pos],
             partitions[left_rank][left_pos],
         )
+    return partitions
 
 
 def balanced_partition(weights: Sequence[int], num_partitions: int) -> list[list[int]]:
