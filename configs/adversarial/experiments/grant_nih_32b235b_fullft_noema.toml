@@ -41,6 +41,7 @@ num_infer_nodes = 1
 [generator.trainer.ckpt]
 interval = 100
 keep_last = 2
+save_threads = 8
 
 [generator.orchestrator]
 batch_size = 1024
@@ -100,6 +101,7 @@ max_retries = 8
 interval = 100000
 boundary_interval = 100
 keep_last = 1
+save_threads = 8
 
 [judge.inference.vllm]
 max_num_batched_tokens = 32768
