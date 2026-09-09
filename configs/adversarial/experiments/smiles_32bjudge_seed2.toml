@@ -1,0 +1,32 @@
+output_dir = "outputs/adversarial-smiles2formula-8bgen-32bjudge-seed2"
+
+[generator.wandb]
+name = "smiles2formula-8bgen-32bjudge-b64r8-ipo-2nodes-seed2"
+
+[generator.orchestrator]
+seed = 43
+
+[generator.orchestrator.train.env]
+args = { seed = 2 }
+
+[judge.model]
+name = "Qwen/Qwen3-32B"
+
+# Two nodes: the generator takes node one, the 32B judge serves at TP-2 and
+# trains on six GPUs of node two.
+[generator.deployment]
+gpus_per_node = 8
+num_infer_gpus = 4
+num_train_gpus = 4
+
+[generator.inference.vllm]
+tensor_parallel_size = 4
+
+[judge.deployment]
+gpus_per_node = 8
+num_infer_gpus = 2
+num_train_gpus = 6
+
+[judge.inference.vllm]
+tensor_parallel_size = 2
+max_model_len = 2048

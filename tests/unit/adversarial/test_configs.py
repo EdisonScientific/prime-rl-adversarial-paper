@@ -19,6 +19,7 @@ EXPERIMENTS = [
     ("smiles_to_formula", ["smiles_8b8b"]),
     ("smiles_to_formula", ["smiles_8b8b", "smiles_14bjudge"]),
     ("smiles_to_formula", ["smiles_8b8b", "smiles_32bjudge"]),
+    ("smiles_to_formula", ["smiles_8b8b", "smiles_32bjudge_seed2"]),
     ("smiles_to_formula", ["smiles_8b8b", "smiles_32bjudge", "smiles_32bjudge_lora"]),
     ("smiles_to_formula", ["smiles_8b8b", "smiles_exact"]),
     ("smiles_to_formula", ["smiles_8b8b", "smiles_judgexexact"]),
