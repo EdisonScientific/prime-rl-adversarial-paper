@@ -12,6 +12,11 @@ name = "/home/abou/code/prime-rl-adversarial/outputs/sft-baseline-smiles2formula
 [generator.orchestrator.train.sampling]
 extra_body = { top_k = 20, min_p = 0.0, chat_template_kwargs = { enable_thinking = false } }
 
+# Local fine-tune paths miss the auto renderer map on purpose; the SFT export
+# keeps the stock Qwen3 chat template, so select its renderer explicitly.
+[generator.orchestrator.renderer]
+name = "qwen3"
+
 [generator.orchestrator.train.env]
 args = { require_reasoning = false }
 
