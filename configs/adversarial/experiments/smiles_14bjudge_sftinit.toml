@@ -4,9 +4,16 @@ output_dir = "outputs/adversarial-smiles2formula-8bgen-14bjudge-sftinit"
 name = "smiles2formula-8bgen-14bjudge-b64r8-ipo-1node-sftinit"
 
 # Generator initialized from the smiles2formula SFT baseline (step 1000, 94.4%
-# exact-formula accuracy) instead of the base model.
+# exact-formula accuracy) instead of the base model. The SFT model was trained
+# and evaluated with thinking disabled, so generation and the format gate match.
 [generator.model]
 name = "/home/abou/code/prime-rl-adversarial/outputs/sft-baseline-smiles2formula/smiles2formula-sft--qwen3-8b--87d62c41/checkpoints/step_1000/weights"
+
+[generator.orchestrator.train.sampling]
+extra_body = { top_k = 20, min_p = 0.0, chat_template_kwargs = { enable_thinking = false } }
+
+[generator.orchestrator.train.env]
+args = { require_reasoning = false }
 
 [judge.model]
 name = "Qwen/Qwen3-14B"
