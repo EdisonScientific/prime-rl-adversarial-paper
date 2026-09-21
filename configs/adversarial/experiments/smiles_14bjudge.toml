@@ -23,3 +23,10 @@ num_train_gpus = 2
 [judge.inference.vllm]
 tensor_parallel_size = 2
 max_model_len = 2048
+
+# Boundary-aligned judge checkpoints: the gate makes the judge's step counter
+# lag the loop, so own-interval saves never share a step with the generator's.
+[judge.trainer.ckpt]
+interval = 100000
+boundary_interval = 100
+keep_last = 2
