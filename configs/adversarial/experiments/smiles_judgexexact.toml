@@ -18,3 +18,10 @@ port = 8015
 [judge.weight_broadcast]
 type = "nccl"
 port = 29522
+
+# Boundary-aligned judge checkpoints: the gate makes the judge's step counter
+# lag the loop, so own-interval saves never share a step with the generator's.
+[judge.trainer.ckpt]
+interval = 100000
+boundary_interval = 100
+keep_last = 2
