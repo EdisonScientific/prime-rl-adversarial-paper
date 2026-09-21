@@ -19,6 +19,7 @@ Usage (from the repo root, on the machine holding the run outputs):
 import argparse
 import json
 import re
+import time
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -90,6 +91,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=None, help="Result jsonl (default: <run_dir>/judge_verifiable_correlation_recomputed.jsonl)")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--limit", type=int, default=None, help="Process at most this many new steps this invocation")
+    parser.add_argument("--min-age", type=float, default=600.0, help="Skip rollout files modified within this many seconds — the training loop may still be writing them")
     args = parser.parse_args()
 
     output = args.output or args.run_dir / "judge_verifiable_correlation_recomputed.jsonl"
@@ -107,7 +109,7 @@ def main() -> None:
         if match is None or int(match.group(1)) in done:
             continue
         rollout_file = step_dir / "generator_rollouts.jsonl"
-        if rollout_file.is_file():
+        if rollout_file.is_file() and time.time() - rollout_file.stat().st_mtime >= args.min_age:
             pending.append((int(match.group(1)), str(rollout_file)))
     pending.sort()
     if args.limit is not None:
