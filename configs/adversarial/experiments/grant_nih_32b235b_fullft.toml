@@ -8,7 +8,7 @@ buffer_batches = 500
 max_skip_streak = 50
 
 [generator]
-max_steps = 3000
+max_steps = 5000
 seq_len = 8192
 
 [generator.model]
@@ -67,7 +67,7 @@ max_model_len = 5120
 reasoning_parser = "qwen3"
 
 [judge]
-max_steps = 3000
+max_steps = 5000
 seq_len = 4096
 
 [judge.model]
