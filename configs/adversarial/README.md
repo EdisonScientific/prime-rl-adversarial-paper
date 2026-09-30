@@ -24,7 +24,9 @@ keys. CLI flags override everything.
   `experiments/`.
 
 Add layers for other tasks or deployments with more `@ <file>` arguments, or
-override single values with dotted flags (`--generator.max-steps 100`).
+override single values with dotted flags (`--generator.max-steps 100`). The
+paper's experiment recipes live in `experiments/`, and the SFT baselines they
+are compared against in `configs/sft_baseline_experiments/`.
 
 ## Run
 
