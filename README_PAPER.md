@@ -1,10 +1,10 @@
-# Adversarial RL on prime-rl
+# Reinforced Adversarial Learning (RAL)
 
-This repository accompanies the paper. It extends
-[prime-rl](https://github.com/PrimeIntellect-ai/prime-rl) with adversarial
-training. A generator and a judge train against each other: the generator
-learns to produce answers the judge accepts, the judge learns to tell
-generated answers from references, and each improves against the other.
+RAL post-trains a reasoning LLM from reference answers alone. A generator and
+a judge train against each other: the generator learns to produce answers the
+judge accepts, the judge learns to tell generated answers from references. No
+explicit reward is needed. Built on
+[prime-rl](https://github.com/PrimeIntellect-ai/prime-rl).
 
 ## The loop
 
@@ -13,9 +13,8 @@ One orchestrator drives both roles
 batch, scores every answer with the served judge, and builds two training
 batches. The generator trains on the judge's scores with IPO loss. The judge
 trains as a binary classifier on generated versus reference answers. Both
-trainers broadcast fresh weights to their inference servers, and the next step
-begins. The `adversarial-rl` entrypoint launches all of it from one layered
-config.
+trainers broadcast fresh weights to their inference servers. The
+`adversarial-rl` entrypoint launches all of it from one layered config.
 
 ## Keeping the game balanced
 
@@ -26,7 +25,7 @@ forgets what it once knew. Three mechanisms counter this.
   above a threshold, so it never runs far ahead of the generator.
 - Judge replay buffer (`src/prime_rl/adversarial/replay.py`): the judge also
   trains on a sliding window of generator history, so beaten strategies stay
-  in its distribution instead of being rediscovered.
+  in its distribution.
 - EMA target network (`weight_broadcast.ema_decay`): the served judge is a
   Polyak average of the learner, a SAC-style target, so the generator's reward
   moves slowly even while the judge trains every step.
@@ -36,9 +35,9 @@ forgets what it once knew. Three mechanisms counter this.
 Four task environments (`src/prime_rl/adversarial/environments/`):
 multiplication, countdown code, SMILES-to-formula, and paper abstracts. Each
 defines the question, the reference, the candidate parsing, and the judge
-prompt. Verifiable tasks also report a graded distance, which grades the judge
-against ground truth. SFT baselines (`environments/tasksets/`) train on the
-same data and are scored by the same rules.
+prompt. Verifiable tasks also report a graded distance, used to score the
+judge against ground truth. SFT baselines (`environments/tasksets/`) train on
+the same data and are scored by the same rules.
 
 ## Long runs
 
