@@ -19,7 +19,7 @@ keys. CLI flags override everything.
 - `multiplication.toml`, the 4-digit multiplication task. The dataset
   regenerates from its seed, so the example needs no external data.
 - task env layers for the paper runs (`countdown_code.toml`,
-  `smiles_to_formula.toml`, `grant_abstract.toml`, `deslopify_abstract.toml`):
+  `smiles_to_formula.toml`, `medical_abstract.toml`, `grant_abstract.toml`):
   dataset args and run names, stacked under the experiment recipes in
   `experiments/`.
 

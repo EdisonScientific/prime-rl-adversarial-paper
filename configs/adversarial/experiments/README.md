@@ -1,67 +1,34 @@
 # Adversarial experiments
 
-Experiment configs for the paper runs, layered onto the base recipe and the
-task env layers one directory up: files deep-merge in order (later files
-override earlier keys), composed as
-`base.toml @ <env>.toml @ <experiment>.toml [@ <stacked>.toml ...]`.
+The paper's experiment configs, one directory per experiment. Files deep-merge
+in order, composed as `base.toml @ <env>.toml @ <experiment>.toml
+[@ <overlay>.toml ...]`.
 
 Launch through `run.sbatch` (exclusive full nodes) or `run_shared.sbatch`
-(4 GPUs on a shared node; experiments must resolve to disjoint server and
-broadcast ports). Extra CLI args pass through, including additional `@ <file>`
-layers.
+(4 GPUs on a shared node, so stacked experiments must resolve to disjoint
+server and broadcast ports). Extra CLI args pass through, including additional
+`@ <file>` layers.
 
 ## Experiments
 
 | Experiment | Stack | Nodes | Launch |
 |---|---|---|---|
-| multiplication 0.6B gen vs 0.6B judge (paper family base) | `multiplication_06b06b` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch multiplication multiplication_06b06b` |
-| + 1.7B judge | `multiplication_06b06b` + `multiplication_1p7bjudge` | half node | append `@ configs/adversarial/experiments/multiplication_1p7bjudge.toml` |
-| + 4B judge | `multiplication_06b06b` + `multiplication_4bjudge` | half node | append `@ configs/adversarial/experiments/multiplication_4bjudge.toml` |
-| + exact reward only (frozen 0.6B judge) | `multiplication_06b06b` + `multiplication_exact` | half node | append `@ .../multiplication_exact.toml` |
-| + judge x exact reward | `multiplication_06b06b` + `multiplication_judgexexact` | half node | append `@ .../multiplication_judgexexact.toml` |
-| multiplication 0.6B/0.6B (sync arm of the sync-vs-native A/B) | `multiplication_ab` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch multiplication multiplication_ab` |
-| countdown 1.7B gen vs 1.7B judge (paper family base) | `countdown_1p7b1p7b` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch countdown_code countdown_1p7b1p7b` |
-| + 4B or 8B judge | `countdown_1p7b1p7b` + `countdown_4bjudge` / `countdown_8bjudge` | half node | append the judge overlay |
-| + 14B judge | `countdown_1p7b1p7b` + `countdown_14bjudge` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch countdown_code countdown_1p7b1p7b @ configs/adversarial/experiments/countdown_14bjudge.toml` |
-| + 32B judge | `countdown_1p7b1p7b` + `countdown_32bjudge` | 2 | `sbatch configs/adversarial/experiments/run.sbatch countdown_code countdown_1p7b1p7b @ configs/adversarial/experiments/countdown_32bjudge.toml` |
-| + exact reward only (frozen 1.7B judge) | `countdown_1p7b1p7b` + `countdown_exact` | half node | append `@ .../countdown_exact.toml` |
-| + judge x exact reward | `countdown_1p7b1p7b` + `countdown_judgexexact` | half node | append `@ .../countdown_judgexexact.toml` |
-| medical abstracts 8B gen vs learned 14B judge | `medical_8b14b` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch medical_abstract medical_8b14b` |
-| smiles 8B gen vs 8B judge (paper family base) | `smiles_8b8b` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch smiles_to_formula smiles_8b8b` |
-| + 14B judge | `smiles_8b8b` + `smiles_14bjudge` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch smiles_to_formula smiles_8b8b @ configs/adversarial/experiments/smiles_14bjudge.toml` |
-| + 32B judge | `smiles_8b8b` + `smiles_32bjudge` | 2 | append `@ .../smiles_32bjudge.toml` on `run.sbatch` |
-| + 32B judge, LoRA both roles | ... + `smiles_32bjudge_lora` | 2 | append both overlays |
-| + exact reward only (frozen 0.6B judge) | `smiles_8b8b` + `smiles_exact` | 1 (`--nodes=1`) | append `@ .../smiles_exact.toml` on `run.sbatch` |
-| + judge x exact reward | `smiles_8b8b` + `smiles_judgexexact` | half node | append `@ .../smiles_judgexexact.toml` |
-| grant NIH 32B gen vs 235B judge, LoRA both roles | `grant_nih_32b235b_lora` | 6 (`--nodes=6`) | `sbatch --nodes=6 configs/adversarial/experiments/run.sbatch grant_abstract grant_nih_32b235b_lora` |
-| grant NIH, LoRA generator + full-finetuned judge | `grant_nih_32b235b_genlora` | 8 (`--nodes=8`) | `sbatch --nodes=8 configs/adversarial/experiments/run.sbatch grant_abstract grant_nih_32b235b_genlora` |
-| deslopify 8B gen vs 8B judge, full finetune | `deslopify_8b8b` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch deslopify_abstract deslopify_8b8b` |
-| + LoRA both roles | `deslopify_8b8b` + `deslopify_8b8b_lora` | 1 (`--nodes=1`) | append `@ configs/adversarial/experiments/deslopify_8b8b_lora.toml` |
-| deslopify 14B gen vs 14B judge, full finetune | `deslopify_14b14b` | 2 | `sbatch configs/adversarial/experiments/run.sbatch deslopify_abstract deslopify_14b14b` |
+| multiplication 0.6B gen vs 0.6B judge (family base) | `multiplication/06b06b` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch multiplication multiplication/06b06b` |
+| + 1.7B or 4B judge | + `multiplication/1p7bjudge` or `multiplication/4bjudge` | half node | append the judge overlay |
+| + exact reward only | + `multiplication/exact` | half node | append `@ .../multiplication/exact.toml` |
+| + judge x exact reward | + `multiplication/judgexexact` | half node | append `@ .../multiplication/judgexexact.toml` |
+| countdown 1.7B gen vs 1.7B judge (family base) | `countdown/1p7b1p7b` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch countdown_code countdown/1p7b1p7b` |
+| + 4B or 8B judge | + `countdown/4bjudge` or `countdown/8bjudge` | half node | append the judge overlay |
+| + 14B judge | + `countdown/14bjudge` | 1 (`--nodes=1`) | append the overlay on `run.sbatch` |
+| + 32B judge | + `countdown/32bjudge` | 2 | append the overlay on `run.sbatch` |
+| + exact reward only | + `countdown/exact` | half node | append `@ .../countdown/exact.toml` |
+| + judge x exact reward | + `countdown/judgexexact` | half node | append `@ .../countdown/judgexexact.toml` |
+| smiles 8B gen vs 8B judge (family base) | `smiles/8b8b` | half node | `sbatch configs/adversarial/experiments/run_shared.sbatch smiles_to_formula smiles/8b8b` |
+| + 14B judge | + `smiles/14bjudge` | 1 (`--nodes=1`) | append the overlay on `run.sbatch` |
+| + 32B judge | + `smiles/32bjudge` | 2 | append the overlay on `run.sbatch` |
+| + exact reward only | + `smiles/exact` | 1 (`--nodes=1`) | append `@ .../smiles/exact.toml` on `run.sbatch` |
+| + judge x exact reward | + `smiles/judgexexact` | half node | append `@ .../smiles/judgexexact.toml` |
+| medical abstracts 8B gen vs learned 14B judge | `medical/8b14b` | 1 (`--nodes=1`) | `sbatch --nodes=1 configs/adversarial/experiments/run.sbatch medical_abstract medical/8b14b` |
+| grant NIH 32B gen vs 235B judge, full finetune | `nih/32b235b` | 7 (`--nodes=7`) | `sbatch --nodes=7 configs/adversarial/experiments/run.sbatch grant_abstract nih/32b235b` |
 
-Smoke any experiment before a long run: append
-`--generator.max-steps 2 --judge.max-steps 2 --output-dir outputs/<smoke-dir> --generator.wandb.name <name>-smoke`
-and a short `--time`. The genlora judge trainer's three-node memory fit and its NCCL
-broadcast to replica engines have not been smoke-verified.
-
-## Constraints these configs encode
-
-- LoRA roles must broadcast weights via the filesystem (vLLM loads adapters
-  from disk); full-finetuned roles use NCCL, including to replica engines
-  (the upstream receiver handles the rank fan-out). Roles co-located on one
-  node need distinct broadcast and server ports.
-- The 235B MoE judge: LoRA adapters must target attention only (expert
-  adapters do not load in vLLM), and a full-finetuned judge must serve at
-  TP-4 (at TP-8 the expert intermediate size violates the CUTLASS MoE
-  kernel's 128-multiple requirement; LoRA-enabled serving avoids that kernel).
-- `thinking_token_budget` requires the serving engine to run with a reasoning
-  parser (`reasoning_parser = "qwen3"` for hybrid Qwen3 models, which parser
-  auto-detection leaves unset).
-- Cold model loads read from Lustre at ~200MB/s (the 235B judge takes ~27
-  minutes on a node that has not served it before; warm page cache cuts that
-  to ~11). Boot cost is negligible for long runs; for rapid restart loops,
-  pre-stage weights to node-local disk and point ``model.name`` at the local
-  path, as the legacy runs did with ``/tmp/qwen3-32b-hf``.
-- Generation dominates step time; the fast layout gives the generator a
-  dedicated TP-8 inference node and a `max_model_len` just above
-  prompt + completion so the KV cache holds more concurrent sequences.
+Resume any experiment by appending `--resume` to its launch command.
