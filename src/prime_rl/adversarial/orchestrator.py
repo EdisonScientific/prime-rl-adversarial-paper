@@ -401,7 +401,9 @@ async def score_and_build_judge_batch(
     if replay_buffer is not None and replay_fraction > 0.0 and replay_rng is not None:
         # Sample the window before this step's generations enter it, then extend
         # the judge batch with replayed negatives and their references so the
-        # class balance holds. Replay never feeds rewards or the gate.
+        # class balance holds. Replay never feeds rewards or the gate. Replay
+        # ids live in a reserved band (900_000+) of the per-step id space, above
+        # the fresh rows' group_idx * 10_000 + rollout_idx * 2.
         for idx, item in enumerate(replay_buffer.sample(int(replay_fraction * len(scored_positions)), replay_rng)):
             if judge_objective == "pairwise":
                 tasks = [

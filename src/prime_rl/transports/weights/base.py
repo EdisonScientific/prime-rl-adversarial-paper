@@ -121,7 +121,7 @@ class WeightSender(ABC):
                 for shadow, param in zip(self._shadow, params, strict=True):
                     shadow.lerp_(param.detach(), alpha)
                 if self.world.is_master:
-                    self.logger.info(
+                    self.logger.debug(
                         f"EMA target absorbed {elapsed} clock step(s) toward the learner (alpha={alpha:.4f})"
                     )
         self._swap_shadow(model)
