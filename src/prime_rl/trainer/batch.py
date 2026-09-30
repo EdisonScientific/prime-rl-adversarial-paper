@@ -212,7 +212,7 @@ def _partition_loads(weights: Sequence[int], partitions: list[list[int]]) -> lis
 
 # Each pass scans O(n^2) candidate swaps and applies one, so unbounded passes
 # grind for hours on large batches with adversarial length distributions. The
-# Karmarkar-Karp seed is near-optimal already; a bounded refinement is a
+# Karmarkar-Karp seed is near-optimal already, so a bounded refinement is a
 # strictly time-limited polish.
 _MAX_REFINE_PASSES = 16
 

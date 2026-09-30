@@ -273,14 +273,14 @@ def train(config: TrainerConfig):
         prof = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True).__enter__()
         maybe_record_function = record_function
     start_step = progress.step
-    # Boundary checkpoints follow the consumer-driven clock; all ranks must
+    # Boundary checkpoints follow the consumer-driven clock. All ranks must
     # agree on the bucket, so the master reads the clock and broadcasts.
     ckpt_boundary_interval = config.ckpt.boundary_interval if config.ckpt else None
     ckpt_boundary_bucket = 0
     if ckpt_boundary_interval:
         bucket_holder = [None]
         if world.is_master:
-            # The clock marks the loop step now starting; step B completes at clock B+1.
+            # The clock marks the loop step now starting. Step B completes at clock B+1.
             bucket_holder[0] = max(0, (read_ema_clock(get_broadcast_dir(config.output_dir)) or 1) - 1) // ckpt_boundary_interval
         dist.broadcast_object_list(bucket_holder, src=0)
         ckpt_boundary_bucket = bucket_holder[0]

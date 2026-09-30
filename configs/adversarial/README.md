@@ -5,7 +5,7 @@ produce answers the judge accepts. The judge learns to tell generated answers
 from references. One orchestrator drives both: it generates rollouts, scores
 them with the served judge, and feeds each side its training batch.
 
-The entrypoint is `adversarial-rl`. It launches everything a run needs — the
+The entrypoint is `adversarial-rl`. It launches everything a run needs: the
 orchestrator, and a trainer and an inference server per role.
 
 ## Configure
@@ -13,10 +13,10 @@ orchestrator, and a trainer and an inference server per role.
 Config files are layers that deep-merge in order. Later files override earlier
 keys. CLI flags override everything.
 
-- `base.toml` — the shared recipe: Qwen3-0.6B generator vs Qwen3-1.7B judge,
+- `base.toml`, the shared recipe: Qwen3-0.6B generator vs Qwen3-1.7B judge,
   IPO loss, batch 128 with 8 rollouts per example, judge update gate at 0.75,
   checkpoints every 100 steps, both roles on 4 GPUs of one node.
-- `multiplication.toml` — the 4-digit multiplication task. The dataset
+- `multiplication.toml`, the 4-digit multiplication task. The dataset
   regenerates from its seed, so the example needs no external data.
 
 Add layers for other tasks or deployments with more `@ <file>` arguments, or

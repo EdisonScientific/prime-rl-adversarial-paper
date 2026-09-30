@@ -7,7 +7,7 @@ CONFIG_DIR = Path("configs/adversarial")
 
 
 def test_example_recipe_validates():
-    """The adversarial configs are layers; only their composition must validate."""
+    """The adversarial configs are layers. Only their composition must validate."""
     args = []
     for name in ["base", "multiplication"]:
         args += ["@", (CONFIG_DIR / f"{name}.toml").as_posix()]
