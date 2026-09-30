@@ -1,6 +1,5 @@
-# Judge replay: the judge trains against a sliding window of generator history
-# alongside the current batch, so previously beaten generator strategies stay
-# in its training distribution instead of being forgotten and rediscovered.
+# The judge trains on a sliding window of generator history alongside the
+# current batch, so once-beaten strategies stay in its training distribution.
 
 import random
 from dataclasses import dataclass
@@ -46,7 +45,7 @@ class ReplayBuffer:
 
 
 def seed_replay_buffer(buffer: ReplayBuffer, rollout_dir: Path, env: Any, before_step: int, batches: int) -> int:
-    """Refill the window from the generator rollouts a previous run already saved."""
+    """Refill the window from the rollouts a previous run saved."""
     if not rollout_dir.is_dir():
         return 0
     steps = sorted(s for s in get_all_ckpt_steps(rollout_dir) if s < before_step)[-batches:]
@@ -60,7 +59,7 @@ def seed_replay_buffer(buffer: ReplayBuffer, rollout_dir: Path, env: Any, before
             try:
                 row = orjson.loads(line)
             except orjson.JSONDecodeError:
-                # Crash-truncated rollout files are expected on resume
+                # A crash can truncate the last line of a rollout file.
                 skipped += 1
                 continue
             info = row.get("info") or {}

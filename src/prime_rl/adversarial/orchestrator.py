@@ -399,11 +399,9 @@ async def score_and_build_judge_batch(
                 )
 
     if replay_buffer is not None and replay_fraction > 0.0 and replay_rng is not None:
-        # Sample the window before this step's generations enter it, then extend
-        # the judge batch with replayed negatives and their references so the
-        # class balance holds. Replay never feeds rewards or the gate. Replay
-        # ids live in a reserved band (900_000+) of the per-step id space, above
-        # the fresh rows' group_idx * 10_000 + rollout_idx * 2.
+        # Sample before this step's generations enter the window. Replayed pairs
+        # keep the class balance and never feed rewards or the gate. Their ids
+        # take the reserved 900_000+ band of the per-step id space.
         for idx, item in enumerate(replay_buffer.sample(int(replay_fraction * len(scored_positions)), replay_rng)):
             if judge_objective == "pairwise":
                 tasks = [
@@ -588,8 +586,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             start_step = resume_snapshot["loop_step"]
             judge_start_step = resume_snapshot["judge_train_step"]
             logger.info(f"Resuming from loop step {start_step} (judge train step {judge_start_step})")
-        # Seed the judge replay buffer from saved rollouts while the trainers
-        # load their checkpoints; neither side depends on the other.
+        # Seed the replay buffer from saved rollouts while the trainers load
+        # their checkpoints. The two need nothing from each other.
         replay_buffer: ReplayBuffer | None = None
         replay_rng: random.Random | None = None
         seed_task: asyncio.Task[int] | None = None
