@@ -237,7 +237,9 @@ def train(config: TrainerConfig):
             path=resume_dir / "trainer" if resume_dir is not None else None,
         )
         if weight_sender is not None:
-            shadow_dir = resume_dir / "trainer" if resume_dir is not None else ckpt_manager.get_ckpt_path(checkpoint_step)
+            shadow_dir = (
+                resume_dir / "trainer" if resume_dir is not None else ckpt_manager.get_ckpt_path(checkpoint_step)
+            )
             weight_sender.load_shadow(shadow_dir, model)
         # The checkpoint finished step ``checkpoint_step``; resume training at the next step.
         progress.step += 1
@@ -281,7 +283,9 @@ def train(config: TrainerConfig):
         bucket_holder = [None]
         if world.is_master:
             # The clock marks the loop step now starting. Step B completes at clock B+1.
-            bucket_holder[0] = max(0, (read_ema_clock(get_broadcast_dir(config.output_dir)) or 1) - 1) // ckpt_boundary_interval
+            bucket_holder[0] = (
+                max(0, (read_ema_clock(get_broadcast_dir(config.output_dir)) or 1) - 1) // ckpt_boundary_interval
+            )
         dist.broadcast_object_list(bucket_holder, src=0)
         ckpt_boundary_bucket = bucket_holder[0]
     max_peak_memory = 0.0
@@ -324,7 +328,9 @@ def train(config: TrainerConfig):
         if ckpt_boundary_interval and progress.step > start_step:
             bucket_holder = [None]
             if world.is_master:
-                bucket = max(0, (read_ema_clock(get_broadcast_dir(config.output_dir)) or 1) - 1) // ckpt_boundary_interval
+                bucket = (
+                    max(0, (read_ema_clock(get_broadcast_dir(config.output_dir)) or 1) - 1) // ckpt_boundary_interval
+                )
                 bucket_holder[0] = bucket if bucket > ckpt_boundary_bucket else None
             dist.broadcast_object_list(bucket_holder, src=0)
             if bucket_holder[0] is not None:
@@ -336,7 +342,9 @@ def train(config: TrainerConfig):
                     ckpt_manager.save(finished_step, model, [optimizer], scheduler, progress)
                     progress.step = finished_step + 1
                     if weight_sender is not None:
-                        weight_sender.save_shadow(ckpt_manager.get_ckpt_path(finished_step), threads=config.ckpt.save_threads)
+                        weight_sender.save_shadow(
+                            ckpt_manager.get_ckpt_path(finished_step), threads=config.ckpt.save_threads
+                        )
                     ckpt_manager.maybe_clean()
 
         # Load the training batch
