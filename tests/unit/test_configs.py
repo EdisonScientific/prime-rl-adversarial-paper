@@ -38,9 +38,14 @@ def get_config_files() -> list[Path]:
 
     # configs/adversarial holds composable layers for the adversarial-rl entrypoint.
     # No single file parses standalone. Compositions are validated in
-    # tests/unit/adversarial/test_configs.py.
+    # tests/unit/adversarial/test_configs.py. Underscore-prefixed files elsewhere
+    # are partial layers merged via multiple `@` files, not standalone configs.
     adversarial_dir = Path("configs/adversarial")
-    return [f for f in config_files + example_files + k8s_files if not f.is_relative_to(adversarial_dir)]
+    return [
+        f
+        for f in config_files + example_files + k8s_files
+        if not f.is_relative_to(adversarial_dir) and not f.name.startswith("_")
+    ]
 
 
 @pytest.mark.parametrize("config_file", get_config_files(), ids=lambda x: x.as_posix())
