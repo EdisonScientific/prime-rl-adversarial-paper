@@ -55,7 +55,7 @@ uv run adversarial-rl @ configs/adversarial/base.toml @ configs/adversarial/mult
 ```
 
 The run continues from the latest step at which both roles hold a complete
-checkpoint. Models, optimizers, and step counters restore exactly, and metrics
-keep flowing into the same wandb run. When enabled, the judge replay buffer
-reseeds from the saved rollouts and the EMA target reloads from its saved
-shadow. Half-written checkpoints from the crash are detected and skipped.
+checkpoint. Models, optimizers, and counters restore exactly, and metrics keep
+flowing into the same wandb run. When enabled, the replay buffer reseeds from
+the saved rollouts and the EMA target reloads from its saved shadow.
+Half-written checkpoints are skipped.

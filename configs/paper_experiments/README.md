@@ -1,9 +1,8 @@
 # Paper experiments
 
-Every recipe behind the paper's tables: the adversarial runs under
-`adversarial/` and the SFT baselines they are compared against under `sft/`.
-Configs are layers that deep-merge in order. The adversarial base recipe and
-the task env layers live in `configs/adversarial/`.
+Every recipe behind the paper's tables: adversarial runs under `adversarial/`,
+SFT baselines under `sft/`. Configs deep-merge in order. The base recipe and
+task layers live in `configs/adversarial/`.
 
 ## Adversarial runs
 
@@ -34,10 +33,9 @@ server and broadcast ports). Extra CLI args pass through, including additional
 
 ## SFT baselines
 
-One config per task over the shared `sft/base.toml`, trained on the same data
-as the adversarial runs and evaluated online against the same verifiable
-scoring rules (the `environments/tasksets` package). Tasks: `multiplication`,
-`countdown`, `smiles2formula`, `grant_abstracts`.
+One config per task over the shared `sft/base.toml`. Each trains on the same
+data as the adversarial runs and is scored by the same verifiable rules.
+Tasks: `multiplication`, `countdown`, `smiles2formula`, `grant_abstracts`.
 
 ```bash
 sbatch configs/paper_experiments/sft/sft.sbatch multiplication
