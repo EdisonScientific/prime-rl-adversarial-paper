@@ -40,11 +40,7 @@ def get_config_files() -> list[Path]:
     # layers. No single file parses standalone. Their compositions are validated
     # in tests/unit/adversarial/test_configs.py and test_sft_baseline_recipes_validate.
     layer_dirs = [Path("configs/adversarial"), Path("configs/sft_baseline_experiments")]
-    return [
-        f
-        for f in config_files + example_files + k8s_files
-        if not any(f.is_relative_to(d) for d in layer_dirs)
-    ]
+    return [f for f in config_files + example_files + k8s_files if not any(f.is_relative_to(d) for d in layer_dirs)]
 
 
 SFT_BASELINES = ["multiplication", "countdown", "smiles2formula", "grant_abstracts"]
