@@ -56,7 +56,7 @@ def complete_ckpt_steps(role_output_dir: Path) -> set[int]:
 def resolve_resume_point(output_dir: Path, generator_output_dir: Path, judge_output_dir: Path) -> dict[str, Any]:
     """Latest boundary snapshot backed by both roles' checkpoints. The judge
     checkpoints on the same loop boundaries via ckpt.boundary_interval, labeled
-    with its own train step; the snapshot carries the pairing."""
+    with its own train step. The snapshot carries the pairing."""
     snapshots = sorted(
         (output_dir / SNAPSHOT_DIR).glob("step_*.json"),
         key=lambda p: int(p.stem.split("_")[1]),

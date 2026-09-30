@@ -36,8 +36,8 @@ def get_config_files() -> list[Path]:
     # stale key there breaks a deploy with nothing else to catch it.
     k8s_files = list(Path("k8s").rglob("*.toml"))
 
-    # configs/adversarial holds composable layers for the adversarial-rl entrypoint;
-    # no single file parses standalone. Compositions are validated in
+    # configs/adversarial holds composable layers for the adversarial-rl entrypoint.
+    # No single file parses standalone. Compositions are validated in
     # tests/unit/adversarial/test_configs.py.
     adversarial_dir = Path("configs/adversarial")
     return [f for f in config_files + example_files + k8s_files if not f.is_relative_to(adversarial_dir)]

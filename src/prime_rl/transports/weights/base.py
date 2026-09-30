@@ -29,11 +29,10 @@ RECEIVER_READY_MARKER = ".receiver_ready"
 STARTED_MARKER = ".started"
 FINISHED_MARKER = ".finished"
 
-# Step counter for the EMA target, written by the consumer's driver (e.g. the
-# adversarial orchestrator, once per generator step). It decouples the target's
-# convergence from the sender's broadcast cadence: a gated role that skipped k
-# steps folds them into one decay^k blend at its next broadcast — the weights
-# were frozen in between, so the result equals per-step blending.
+# Step counter for the EMA target, written by the consumer's driver once per
+# step. A sender that skipped k steps folds them into one decay^k blend at its
+# next broadcast. The weights were frozen in between, so this equals per-step
+# blending.
 EMA_CLOCK_FILE = "ema_clock"
 
 
@@ -103,10 +102,9 @@ class WeightSender(ABC):
             self.logger.debug(f"Broadcasted weights for step {step} in {time.perf_counter() - start_time:.2f}s")
 
     def _swap_in_shadow(self, model: nn.Module) -> bool:
-        """Polyak-average the trainable weights into the shadow copy and swap it
-        in for the transfer: consumers serve a slow target that trails training,
-        SAC-style, while optimization continues on the live weights. The shadow
-        shards with the model and re-seeds from the live weights on restart."""
+        """Blend the live weights into the shadow and swap it in for the
+        transfer: consumers serve a slow-moving target while training continues
+        on the live weights. The shadow shards with the model."""
         if self.ema_decay is None:
             return False
         with torch.no_grad():
@@ -121,15 +119,15 @@ class WeightSender(ABC):
                 for shadow, param in zip(self._shadow, params, strict=True):
                     shadow.lerp_(param.detach(), alpha)
                 if self.world.is_master:
-                    self.logger.info(
+                    self.logger.debug(
                         f"EMA target absorbed {elapsed} clock step(s) toward the learner (alpha={alpha:.4f})"
                     )
         self._swap_shadow(model)
         return True
 
     def save_shadow(self, ckpt_path: Path, threads: int = 1) -> None:
-        """Persist the EMA target alongside the trainer checkpoint (bf16, sharded
-        like the model) so a resume restores the target instead of re-seeding it."""
+        """Persist the EMA target with the trainer checkpoint, in bf16, so a
+        resume restores the target instead of re-seeding it."""
         if self._shadow is None:
             return
         state = {str(i): t.to(torch.bfloat16) for i, t in enumerate(self._shadow)}
@@ -149,8 +147,8 @@ class WeightSender(ABC):
         return True
 
     def _advance_ema_clock(self) -> int:
-        """Steps elapsed on the consumer-driven clock since the last broadcast;
-        1 when nobody writes the clock (broadcast cadence = step cadence)."""
+        """Steps elapsed on the consumer clock since the last broadcast.
+        Defaults to 1 when nobody writes the clock."""
         clock = read_ema_clock(get_broadcast_dir(self.output_dir))
         if clock is None:
             return 1

@@ -37,7 +37,7 @@ from prime_rl.utils.utils import clean_exit
 # The rollout retry filter in verifiers treats router circuit-breaker failures
 # (ModelError -> InternalServerError) as non-retryable, so one breaker flap
 # drops every affected call regardless of max_retries. Widen the filter to all
-# model errors; the wrapper's exponential backoff rides out the breaker window.
+# model errors. The wrapper's exponential backoff rides out the breaker window.
 _vf_environment = importlib.import_module("verifiers.legacy.envs.environment")
 _maybe_retry = _vf_environment.maybe_retry
 
@@ -223,7 +223,7 @@ async def run_generator_eval(
     for example, rollouts in zip(examples, generator_groups):
         for rollout in rollouts:
             result = generator.env.adversarial_generator_result(rollout.get("completion"), example)
-            # Free-generation envs have no programmatic check; their eval tracks format compliance.
+            # Free-generation envs have no programmatic check. Their eval tracks format compliance.
             rollout["reward"] = float(result.get("verifiable_reward", result["metrics"]["format_reward"]))
             rollout.setdefault("metrics", {}).update(result["metrics"])
             rollout.setdefault("info", {})
@@ -399,9 +399,9 @@ async def score_and_build_judge_batch(
                 )
 
     if replay_buffer is not None and replay_fraction > 0.0 and replay_rng is not None:
-        # Sample the window before this step's generations enter it, then extend
-        # the judge batch with replayed negatives and their references so the
-        # class balance holds. Replay never feeds rewards or the gate.
+        # Sample before this step's generations enter the window. Replayed pairs
+        # keep the class balance and never feed rewards or the gate. Their ids
+        # take the reserved 900_000+ band of the per-step id space.
         for idx, item in enumerate(replay_buffer.sample(int(replay_fraction * len(scored_positions)), replay_rng)):
             if judge_objective == "pairwise":
                 tasks = [
@@ -586,8 +586,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
             start_step = resume_snapshot["loop_step"]
             judge_start_step = resume_snapshot["judge_train_step"]
             logger.info(f"Resuming from loop step {start_step} (judge train step {judge_start_step})")
-        # Seed the judge replay buffer from saved rollouts while the trainers
-        # load their checkpoints; neither side depends on the other.
+        # Seed the replay buffer from saved rollouts while the trainers load
+        # their checkpoints. The two need nothing from each other.
         replay_buffer: ReplayBuffer | None = None
         replay_rng: random.Random | None = None
         seed_task: asyncio.Task[int] | None = None
@@ -682,7 +682,7 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 for example in batch_examples
             ]
             # Generation only needs the generator weights, so the judge's slow
-            # broadcast from the previous step overlaps it; scoring is what
+            # broadcast from the previous step overlaps it. Scoring is what
             # requires the updated judge, and it starts after this await. The
             # router's circuit breaker can trail a long weight reload, so wait
             # for the pool instead of firing scoring into the cooldown window.
@@ -709,8 +709,8 @@ async def adversarial_orchestrate(config: AdversarialRLConfig) -> None:
                 for key, value in rollout["metrics"].items():
                     if value is not None:
                         generator_metrics.setdefault(key, []).append(float(value))
-            # The gate balances the judge against the current generator only;
-            # replayed history trains the judge but never inflates its accuracy.
+            # The gate balances the judge against the current generator only.
+            # Replayed history trains the judge but never inflates its accuracy.
             judge_rewards = [
                 float(r["reward"])
                 for r in scored.judge_rollouts

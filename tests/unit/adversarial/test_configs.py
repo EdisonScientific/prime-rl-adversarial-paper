@@ -50,7 +50,7 @@ EXPERIMENTS = [
 
 @pytest.mark.parametrize("env", ENVS)
 def test_composed_recipes_validate(env: str):
-    """The adversarial configs are layers; only their compositions must validate."""
+    """The adversarial configs are layers. Only their compositions must validate."""
     args = []
     for name in ["base", env]:
         args += ["@", (CONFIG_DIR / f"{name}.toml").as_posix()]

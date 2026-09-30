@@ -11,8 +11,8 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      # The CUDA-13 dependency stack barely fits the runner disk; drop the
-      # preinstalled toolchains we never use (~25GB).
+      # The CUDA-13 dependency stack barely fits the runner disk.
+      # Drop ~25GB of preinstalled toolchains we never use.
       - name: Free runner disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
       - name: Checkout repository

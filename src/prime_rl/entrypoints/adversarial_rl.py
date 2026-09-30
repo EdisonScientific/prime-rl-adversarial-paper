@@ -147,7 +147,7 @@ def apply_role_hosts(config: AdversarialRLConfig, allocation: dict[str, dict[str
             host = inference_nodes[0] if inference_nodes else "localhost"
             run.orchestrator.client.base_url = f"http://{host}:{run.inference.server.port}/v1"
             if len(inference_nodes) > 1:
-                # Admin ops must reach every replica engine directly; the router
+                # Admin ops must reach every replica engine directly. The router
                 # only forwards the data plane.
                 run.orchestrator.client.admin_base_url = [
                     f"http://{node}:{run.inference.backend_port}/v1" for node in inference_nodes
@@ -160,7 +160,7 @@ def apply_role_hosts(config: AdversarialRLConfig, allocation: dict[str, dict[str
             run.orchestrator.weight_broadcast.host = trainer_host
             # The orchestrator subprocess re-parses the dumped config, and the
             # shared-block validator re-derives the orchestrator's broadcast
-            # config from it — the host must survive that round trip.
+            # config from it, so the host must survive that round trip.
             if run.weight_broadcast is not None and run.weight_broadcast.type == "nccl":
                 run.weight_broadcast.host = trainer_host
 
@@ -180,7 +180,7 @@ def write_configs(config: AdversarialRLConfig, config_dir: Path) -> None:
             with open(role_dir / INFERENCE_CONFIG, "w") as f:
                 json.dump(dump_resolved_config(role_config.inference, exclude=INFERENCE_CONFIG_EXCLUDE), f, indent=2)
             if role_config.deployment.type == "multi_node" and role_config.deployment.total_infer_nodes > 1:
-                # Replica engines run bare on backend_port; a shared router on
+                # Replica engines run bare on backend_port. A shared router on
                 # server.port load-balances across them.
                 engine = role_config.inference.model_copy(deep=True)
                 engine.router = None
