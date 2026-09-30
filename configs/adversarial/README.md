@@ -6,21 +6,19 @@ trainer and an inference server per role. The method is described in the root
 
 ## Configure
 
-Config files are layers that deep-merge in order. Later files override earlier
-keys. CLI flags override everything.
+Configs are layers that deep-merge in order: later files override earlier
+keys and CLI flags override everything.
 
-- `base.toml`, the shared recipe: Qwen3-0.6B generator vs Qwen3-1.7B judge,
-  IPO loss, batch 128 with 8 rollouts per example, judge update gate at 0.75,
-  checkpoints every 100 steps, both roles on 4 GPUs of one node.
+- `base.toml`, the shared recipe: a 0.6B generator against a 1.7B judge on
+  4 GPUs of one node.
 - `multiplication.toml`, the 4-digit multiplication task. The dataset
   regenerates from its seed, so the example needs no external data.
-- task env layers for the paper runs (`countdown_code.toml`,
-  `smiles_to_formula.toml`, `medical_abstract.toml`, `grant_abstract.toml`):
-  dataset args and run names, stacked under the experiment recipes in
+- `countdown_code.toml`, `smiles_to_formula.toml`, `medical_abstract.toml`,
+  and `grant_abstract.toml`, the task layers for the paper recipes in
   `configs/paper_experiments/adversarial/`.
 
-Add layers for other tasks or deployments with more `@ <file>` arguments, or
-override single values with dotted flags (`--generator.max-steps 100`).
+Add layers with more `@ <file>` arguments, or override single values with
+dotted flags (`--generator.max-steps 100`).
 
 ## Run
 
