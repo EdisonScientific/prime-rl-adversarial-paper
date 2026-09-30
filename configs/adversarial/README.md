@@ -1,12 +1,8 @@
 # Adversarial RL
 
-A generator and a judge train against each other. The generator learns to
-produce answers the judge accepts. The judge learns to tell generated answers
-from references. One orchestrator drives both: it generates rollouts, scores
-them with the served judge, and feeds each side its training batch.
-
-The entrypoint is `adversarial-rl`. It launches everything a run needs: the
-orchestrator, and a trainer and an inference server per role.
+`adversarial-rl` launches a full adversarial run: the orchestrator, and a
+trainer and an inference server per role. The method is described in the root
+[`README_PAPER.md`](../../README_PAPER.md).
 
 ## Configure
 
@@ -24,9 +20,7 @@ keys. CLI flags override everything.
   `configs/paper_experiments/adversarial/`.
 
 Add layers for other tasks or deployments with more `@ <file>` arguments, or
-override single values with dotted flags (`--generator.max-steps 100`). The
-paper's experiment recipes, adversarial and SFT baselines alike, live in
-`configs/paper_experiments/`.
+override single values with dotted flags (`--generator.max-steps 100`).
 
 ## Run
 
