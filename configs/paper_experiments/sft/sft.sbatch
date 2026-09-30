@@ -9,8 +9,8 @@
 #SBATCH --time=12:00:00
 #SBATCH --output=slurm-sft-baseline-%j.log
 
-# Usage (from the repo root): sbatch configs/sft_baseline_experiments/sft.sbatch <config>
-# where config is a file name under configs/sft_baseline_experiments/ (e.g. multiplication).
+# Usage (from the repo root): sbatch configs/paper_experiments/sft/sft.sbatch <config>
+# where config is a file name under configs/paper_experiments/sft/ (e.g. multiplication).
 set -euo pipefail
 CONFIG_NAME="$1"
 
@@ -25,4 +25,4 @@ export WANDB_ENTITY="${WANDB_ENTITY:-edison-scientific}"
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS=1
 
-uv run --no-sync sft @ configs/sft_baseline_experiments/base.toml @ "configs/sft_baseline_experiments/${CONFIG_NAME}.toml" "${@:2}"
+uv run --no-sync sft @ configs/paper_experiments/sft/base.toml @ "configs/paper_experiments/sft/${CONFIG_NAME}.toml" "${@:2}"

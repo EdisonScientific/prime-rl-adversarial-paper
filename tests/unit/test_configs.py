@@ -39,7 +39,7 @@ def get_config_files() -> list[Path]:
     # configs/adversarial and configs/sft_baseline_experiments hold composable
     # layers. No single file parses standalone. Their compositions are validated
     # in tests/unit/adversarial/test_configs.py and test_sft_baseline_recipes_validate.
-    layer_dirs = [Path("configs/adversarial"), Path("configs/sft_baseline_experiments")]
+    layer_dirs = [Path("configs/adversarial"), Path("configs/paper_experiments")]
     return [f for f in config_files + example_files + k8s_files if not any(f.is_relative_to(d) for d in layer_dirs)]
 
 
@@ -49,7 +49,7 @@ SFT_BASELINES = ["multiplication", "countdown", "smiles2formula", "grant_abstrac
 @pytest.mark.parametrize("task", SFT_BASELINES)
 def test_sft_baseline_recipes_validate(task: str):
     """The SFT baseline configs are layers over their shared base recipe."""
-    base = Path("configs/sft_baseline_experiments")
+    base = Path("configs/paper_experiments/sft")
     args = ["@", (base / "base.toml").as_posix(), "@", (base / f"{task}.toml").as_posix()]
     cli(SFTConfig, args=args)
 

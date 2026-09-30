@@ -6,7 +6,7 @@ from prime_rl.configs.adversarial import AdversarialRLConfig
 from prime_rl.utils.config import cli
 
 CONFIG_DIR = Path("configs/adversarial")
-EXPERIMENT_DIR = Path("configs/adversarial/experiments")
+EXPERIMENT_DIR = Path("configs/paper_experiments/adversarial")
 ENVS = [
     "multiplication",
     "countdown_code",

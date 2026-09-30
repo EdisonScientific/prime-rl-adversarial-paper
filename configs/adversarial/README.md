@@ -21,12 +21,12 @@ keys. CLI flags override everything.
 - task env layers for the paper runs (`countdown_code.toml`,
   `smiles_to_formula.toml`, `medical_abstract.toml`, `grant_abstract.toml`):
   dataset args and run names, stacked under the experiment recipes in
-  `experiments/`.
+  `configs/paper_experiments/adversarial/`.
 
 Add layers for other tasks or deployments with more `@ <file>` arguments, or
 override single values with dotted flags (`--generator.max-steps 100`). The
-paper's experiment recipes live in `experiments/`, and the SFT baselines they
-are compared against in `configs/sft_baseline_experiments/`.
+paper's experiment recipes, adversarial and SFT baselines alike, live in
+`configs/paper_experiments/`.
 
 ## Run
 
