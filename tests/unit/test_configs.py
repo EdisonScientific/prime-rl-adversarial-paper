@@ -36,9 +36,9 @@ def get_config_files() -> list[Path]:
     # stale key there breaks a deploy with nothing else to catch it.
     k8s_files = list(Path("k8s").rglob("*.toml"))
 
-    # configs/adversarial and configs/sft_baseline_experiments hold composable
-    # layers. No single file parses standalone. Their compositions are validated
-    # in tests/unit/adversarial/test_configs.py and test_sft_baseline_recipes_validate.
+    # configs/adversarial and configs/paper_experiments hold composable layers.
+    # No single file parses standalone. Compositions are validated in
+    # tests/unit/adversarial/test_configs.py and test_sft_baseline_recipes_validate.
     layer_dirs = [Path("configs/adversarial"), Path("configs/paper_experiments")]
     return [f for f in config_files + example_files + k8s_files if not any(f.is_relative_to(d) for d in layer_dirs)]
 
