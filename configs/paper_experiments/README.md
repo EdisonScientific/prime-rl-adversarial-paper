@@ -33,9 +33,8 @@ server and broadcast ports). Extra CLI args pass through, including additional
 
 ## SFT baselines
 
-One config per task over the shared `sft/base.toml`. Each trains on the same
-data as the adversarial runs and is scored by the same verifiable rules.
-Tasks: `multiplication`, `countdown`, `smiles2formula`, `grant_abstracts`.
+One config per task over the shared `sft/base.toml`. Tasks:
+`multiplication`, `countdown`, `smiles2formula`, `grant_abstracts`.
 
 ```bash
 sbatch configs/paper_experiments/sft/sft.sbatch multiplication
