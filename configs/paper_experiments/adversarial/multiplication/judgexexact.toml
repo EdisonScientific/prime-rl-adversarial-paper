@@ -1,0 +1,5 @@
+output_dir = "outputs/adversarial-mult-judgexexact"
+generator_reward_mode = "judge_times_exact"
+
+[generator.wandb]
+name = "multiplication-4digit-0.6bgen-0.6bjudge-judgexexact-b128r8-ipo"

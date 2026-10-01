@@ -1,0 +1,32 @@
+output_dir = "outputs/adversarial-smiles2formula-8bgen-14bjudge"
+
+[generator.wandb]
+name = "smiles2formula-8bgen-14bjudge-b64r8-ipo-1node"
+
+[judge.model]
+name = "Qwen/Qwen3-14B"
+
+# The 14B judge takes the rest of the node: TP-2 serving, two trainer GPUs.
+[generator.deployment]
+gpus_per_node = 8
+num_infer_gpus = 2
+num_train_gpus = 2
+
+[generator.inference.vllm]
+tensor_parallel_size = 2
+
+[judge.deployment]
+gpus_per_node = 8
+num_infer_gpus = 2
+num_train_gpus = 2
+
+[judge.inference.vllm]
+tensor_parallel_size = 2
+max_model_len = 2048
+
+# Boundary-aligned judge checkpoints: the gate makes the judge's step counter
+# lag the loop, so own-interval saves never share a step with the generator's.
+[judge.trainer.ckpt]
+interval = 100000
+boundary_interval = 100
+keep_last = 2

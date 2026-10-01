@@ -1,0 +1,27 @@
+output_dir = "outputs/adversarial-smiles2formula-8bgen-8bjudge-both"
+generator_reward_mode = "judge_times_exact"
+
+# Distinct ports so this run can share a node with the plain 8B/8B arm.
+[generator.wandb]
+name = "smiles2formula-8bgen-8bjudge-both-b64r8-ipo-halfnode"
+
+[generator.inference.server]
+port = 8014
+
+[generator.weight_broadcast]
+type = "nccl"
+port = 29521
+
+[judge.inference.server]
+port = 8015
+
+[judge.weight_broadcast]
+type = "nccl"
+port = 29522
+
+# Boundary-aligned judge checkpoints: the gate makes the judge's step counter
+# lag the loop, so own-interval saves never share a step with the generator's.
+[judge.trainer.ckpt]
+interval = 100000
+boundary_interval = 100
+keep_last = 2

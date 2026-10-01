@@ -42,6 +42,12 @@ class BaseWeightBroadcastConfig(BaseConfig):
     """Timeout in seconds for the broadcast handshake and transfer. The trainer
     fails the run when no consumer acknowledges an offered version in time."""
 
+    ema_decay: Annotated[float, Field(gt=0.0, lt=1.0)] | None = None
+    """Broadcast a Polyak (EMA) average of the trainable weights instead of the
+    live ones, so consumers serve a slow-moving target like a SAC target
+    network. Stabilizes setups where the served model defines another role's
+    reward. None broadcasts the live weights."""
+
 
 class RunConfig(BaseConfig):
     name: str | None = None

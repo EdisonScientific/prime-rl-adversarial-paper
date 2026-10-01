@@ -1,0 +1,43 @@
+output_dir = "outputs/sft-baseline-countdown"
+
+[model]
+name = "Qwen/Qwen3-1.7B"
+
+[data]
+name = "EdisonScientific/countdown-sft"
+seq_len = 4096
+batch_size = 128
+
+[optim]
+lr = 3e-5
+
+[monitors.wandb]
+name = "countdown-qwen3-1.7b-20ksteps"
+
+[weight_broadcast]
+type = "nccl"
+port = 29601
+
+[eval]
+env_server_base_port = 5100
+
+[eval.sampling]
+max_completion_tokens = 1024
+
+[[eval.source]]
+name = "countdown"
+env.taskset.id = "countdown"
+env.taskset.split = "validation"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[[eval.source]]
+name = "countdown-train"
+num_examples = 256
+env.taskset.id = "countdown"
+env.taskset.split = "train"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[inference.server]
+port = 8020

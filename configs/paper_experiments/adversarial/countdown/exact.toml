@@ -1,0 +1,11 @@
+output_dir = "outputs/adversarial-countdown-exact"
+generator_reward_mode = "exact_only"
+
+# Freeze the judge: the gate skips every update and nothing ever forces one,
+# so the 1.7B judge only provides (ignored) scoring metrics.
+[judge_update_gate]
+accuracy_threshold = 0.0
+max_skip_streak = "None"
+
+[generator.wandb]
+name = "countdown-1.7bgen-exact-b64r8-ipo"

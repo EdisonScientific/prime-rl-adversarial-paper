@@ -1,0 +1,51 @@
+# Paper medical-abstracts run: 8B generator vs a learned 14B single-candidate
+# judge on one node. The paper's Haiku pairwise-judge variant ran on the
+# legacy stack; this codebase covers the learned-judge arm.
+
+output_dir = "outputs/adversarial-medical-8bgen-14bjudge"
+
+[judge_update_gate]
+max_skip_streak = 50
+
+[generator]
+max_steps = 2000
+
+[generator.model]
+name = "Qwen/Qwen3-8B"
+
+[generator.wandb]
+project = "medical_abstract_v2"
+name = "medical-abstract-8bgen-14bjudge-b128r8-ipo"
+
+[generator.trainer.loss]
+kl_tau = 0.05
+
+[generator.trainer.optim]
+lr = 2e-7
+
+[generator.orchestrator.train.sampling]
+max_completion_tokens = 4096
+
+[generator.deployment]
+gpus_per_node = 8
+num_infer_gpus = 2
+num_train_gpus = 2
+
+[generator.inference.vllm]
+tensor_parallel_size = 2
+
+[judge]
+max_steps = 2000
+seq_len = 4096
+
+[judge.model]
+name = "Qwen/Qwen3-14B"
+
+[judge.deployment]
+gpus_per_node = 8
+num_infer_gpus = 2
+num_train_gpus = 2
+
+[judge.inference.vllm]
+tensor_parallel_size = 2
+max_model_len = 4096

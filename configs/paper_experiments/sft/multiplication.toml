@@ -1,0 +1,25 @@
+output_dir = "outputs/sft-baseline-multiplication"
+
+[model]
+name = "Qwen/Qwen3-0.6B"
+
+[data]
+name = "EdisonScientific/multiplication-sft"
+
+[monitors.wandb]
+name = "multiplication-qwen3-0.6b-20ksteps"
+
+[[eval.source]]
+name = "multiplication"
+env.taskset.id = "multiplication"
+env.taskset.split = "validation"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[[eval.source]]
+name = "multiplication-train"
+num_examples = 256
+env.taskset.id = "multiplication"
+env.taskset.split = "train"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"

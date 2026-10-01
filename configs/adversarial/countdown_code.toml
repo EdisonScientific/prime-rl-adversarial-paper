@@ -1,0 +1,12 @@
+output_dir = "outputs/adversarial-countdown-code"
+
+[generator.wandb]
+name = "adversarial-countdown-code"
+
+[generator.orchestrator.eval]
+interval = 250
+num_examples = 800
+group_size = 1
+
+[generator.orchestrator.train.env]
+args = { task = "countdown_code", dataset_path = "/home/abou/data/datasets/ral_adversarial_hf_ready_20260817/countdown_code_gpt55_train15k_eval800_seed2_20260721" }

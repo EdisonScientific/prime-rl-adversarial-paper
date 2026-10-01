@@ -1,0 +1,52 @@
+output_dir = "outputs/sft-baseline-grant-abstracts"
+
+[deployment]
+num_train_gpus = 6
+num_infer_gpus = 2
+
+[model]
+name = "Qwen/Qwen3-32B"
+
+[data]
+name = "EdisonScientific/grant-abstracts-NIH-fy2026-sft"
+batch_size = 72
+micro_batch_size = 3
+
+[optim]
+lr = 4.5e-5
+
+[monitors.wandb]
+name = "grant-abstracts-qwen3-32b-20ksteps"
+
+[weight_broadcast]
+type = "nccl"
+port = 29801
+
+[eval]
+env_server_base_port = 5300
+num_examples = 128
+
+[eval.concurrency]
+initial_inflight = 256
+max_inflight = 256
+
+[eval.sampling]
+max_completion_tokens = 1280
+
+[[eval.source]]
+name = "grant-abstracts"
+env.taskset.id = "grant_abstracts"
+env.taskset.split = "validation"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[[eval.source]]
+name = "grant-abstracts-train"
+num_examples = 128
+env.taskset.id = "grant_abstracts"
+env.taskset.split = "train"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[inference.server]
+port = 8060

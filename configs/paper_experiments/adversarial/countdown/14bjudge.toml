@@ -1,0 +1,21 @@
+output_dir = "outputs/adversarial-countdown-1p7b14b"
+
+[generator.wandb]
+name = "countdown-1.7bgen-14bjudge-b64r8-ipo"
+
+[judge.model]
+name = "Qwen/Qwen3-14B"
+
+# The 14B judge needs the rest of the node: TP-2 serving and a 4-GPU trainer.
+[generator.deployment]
+gpus_per_node = 8
+num_infer_gpus = 1
+num_train_gpus = 1
+
+[judge.deployment]
+gpus_per_node = 8
+num_infer_gpus = 2
+num_train_gpus = 4
+
+[judge.inference.vllm]
+tensor_parallel_size = 2

@@ -1,0 +1,71 @@
+# Paper smiles-to-formula family base: 8B generator vs 8B judge on half a
+# node. The judge swaps (14B/32B), LoRA, and the reward variants stack on this
+# file. The dataset (17,938 train / 800 eval) comes from smiles_to_formula.toml.
+
+output_dir = "outputs/adversarial-smiles2formula-8bgen-8bjudge"
+
+[judge_update_gate]
+max_skip_streak = 50
+
+[generator]
+max_steps = 15000
+
+[generator.model]
+name = "Qwen/Qwen3-8B"
+
+[generator.wandb]
+project = "smiles2formula_v2"
+name = "smiles2formula-8bgen-8bjudge-b64r8-ipo-halfnode"
+
+[generator.trainer.loss]
+kl_tau = 0.005
+
+[generator.trainer.optim]
+lr = 5e-7
+
+[generator.orchestrator]
+batch_size = 64
+
+[generator.orchestrator.train.sampling]
+max_completion_tokens = 4096
+extra_body = { top_k = -1, min_p = 0.0, chat_template_kwargs = { enable_thinking = true } }
+
+[generator.deployment]
+gpus_per_node = 2
+num_infer_gpus = 1
+num_train_gpus = 1
+
+[generator.inference.server]
+port = 8010
+
+[generator.weight_broadcast]
+type = "nccl"
+port = 29511
+
+[judge]
+max_steps = 15000
+
+[judge.model]
+name = "Qwen/Qwen3-8B"
+
+[judge.trainer.optim]
+lr = 1e-6
+
+[judge.orchestrator]
+batch_size = 128
+
+[judge.deployment]
+gpus_per_node = 2
+num_infer_gpus = 1
+num_train_gpus = 1
+
+[judge.inference.vllm]
+tensor_parallel_size = 1
+max_model_len = 2048
+
+[judge.inference.server]
+port = 8011
+
+[judge.weight_broadcast]
+type = "nccl"
+port = 29512

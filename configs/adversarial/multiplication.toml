@@ -1,0 +1,12 @@
+output_dir = "outputs/adversarial-test-multiplication"
+
+[generator.wandb]
+name = "adversarial-test-multiplication"
+
+[generator.orchestrator.eval]
+interval = 250
+num_examples = 800
+group_size = 1
+
+[generator.orchestrator.train.env]
+args = { task = "multiplication", n_digits = 4, num_examples = 20000, num_eval_examples = 800 }

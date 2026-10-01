@@ -10,6 +10,8 @@ from datetime import timedelta
 
 from prime_rl.trainer.models.layers.attn import substitute_ring_attn
 from prime_rl.transports.weights import prune_broadcasts_beyond, setup_weight_sender
+from prime_rl.transports.weights.base import read_ema_clock
+from prime_rl.utils.pathing import get_broadcast_dir
 from prime_rl.utils.act_offloading import maybe_activation_offloading
 import torch
 import torch.distributed as dist
@@ -234,6 +236,11 @@ def train(config: TrainerConfig):
             progress,
             path=resume_dir / "trainer" if resume_dir is not None else None,
         )
+        if weight_sender is not None:
+            shadow_dir = (
+                resume_dir / "trainer" if resume_dir is not None else ckpt_manager.get_ckpt_path(checkpoint_step)
+            )
+            weight_sender.load_shadow(shadow_dir, model)
         # The checkpoint finished step ``checkpoint_step``; resume training at the next step.
         progress.step += 1
         logger.info(
@@ -268,6 +275,19 @@ def train(config: TrainerConfig):
         prof = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True).__enter__()
         maybe_record_function = record_function
     start_step = progress.step
+    # Boundary checkpoints follow the consumer-driven clock. All ranks must
+    # agree on the bucket, so the master reads the clock and broadcasts.
+    ckpt_boundary_interval = config.ckpt.boundary_interval if config.ckpt else None
+    ckpt_boundary_bucket = 0
+    if ckpt_boundary_interval:
+        bucket_holder = [None]
+        if world.is_master:
+            # The clock marks the loop step now starting. Step B completes at clock B+1.
+            bucket_holder[0] = (
+                max(0, (read_ema_clock(get_broadcast_dir(config.output_dir)) or 1) - 1) // ckpt_boundary_interval
+            )
+        dist.broadcast_object_list(bucket_holder, src=0)
+        ckpt_boundary_bucket = bucket_holder[0]
     max_peak_memory = 0.0
     while True:
         # Reset peak memory stats
@@ -300,6 +320,32 @@ def train(config: TrainerConfig):
         dataloader.wait_for_batch()
         wait_for_batch_time = time.perf_counter() - wait_for_batch_start_time
         logger.debug(f"Waited for batch for {format_time(wait_for_batch_time)}")
+
+        # A gated role can idle across the driving loop's checkpoint boundaries.
+        # The weights are unchanged since the last finished step, so save that
+        # state now, labeled as the finished step, to match the boundary the
+        # orchestrator recorded.
+        if ckpt_boundary_interval and progress.step > start_step:
+            bucket_holder = [None]
+            if world.is_master:
+                bucket = (
+                    max(0, (read_ema_clock(get_broadcast_dir(config.output_dir)) or 1) - 1) // ckpt_boundary_interval
+                )
+                bucket_holder[0] = bucket if bucket > ckpt_boundary_bucket else None
+            dist.broadcast_object_list(bucket_holder, src=0)
+            if bucket_holder[0] is not None:
+                ckpt_boundary_bucket = bucket_holder[0]
+                finished_step = progress.step - 1
+                if not ckpt_manager.get_ckpt_path(finished_step).exists():
+                    logger.info(f"Saving boundary checkpoint at step {finished_step}")
+                    progress.step = finished_step
+                    ckpt_manager.save(finished_step, model, [optimizer], scheduler, progress)
+                    progress.step = finished_step + 1
+                    if weight_sender is not None:
+                        weight_sender.save_shadow(
+                            ckpt_manager.get_ckpt_path(finished_step), threads=config.ckpt.save_threads
+                        )
+                    ckpt_manager.maybe_clean()
 
         # Load the training batch
         logger.debug("Loading batch")
@@ -618,6 +664,8 @@ def train(config: TrainerConfig):
             logger.info(f"Saving checkpoint at step {progress.step}")
             save_ckpt_start_time = time.perf_counter()
             ckpt_manager.save(progress.step, model, [optimizer], scheduler, progress)
+            if weight_sender is not None:
+                weight_sender.save_shadow(ckpt_manager.get_ckpt_path(progress.step), threads=config.ckpt.save_threads)
             save_ckpt_time = time.perf_counter() - save_ckpt_start_time
 
             ckpt_manager.maybe_clean()
@@ -737,6 +785,8 @@ def train(config: TrainerConfig):
     if config.ckpt is not None:
         logger.info(f"Saving final checkpoint at step {progress.step}")
         ckpt_manager.save(progress.step, model, [optimizer], scheduler, progress)
+        if weight_sender is not None:
+            weight_sender.save_shadow(ckpt_manager.get_ckpt_path(progress.step), threads=config.ckpt.save_threads)
         ckpt_manager.maybe_clean()
 
     if gradient_manager is not None:

@@ -1,0 +1,7 @@
+output_dir = "outputs/adversarial-mult-06b1p7b"
+
+[generator.wandb]
+name = "multiplication-4digit-0.6bgen-1.7bjudge-b128r8-ipo"
+
+[judge.model]
+name = "Qwen/Qwen3-1.7B"

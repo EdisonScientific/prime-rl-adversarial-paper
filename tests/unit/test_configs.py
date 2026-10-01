@@ -36,7 +36,22 @@ def get_config_files() -> list[Path]:
     # stale key there breaks a deploy with nothing else to catch it.
     k8s_files = list(Path("k8s").rglob("*.toml"))
 
-    return config_files + example_files + k8s_files
+    # configs/adversarial and configs/paper_experiments hold composable layers.
+    # No single file parses standalone. Compositions are validated in
+    # tests/unit/adversarial/test_configs.py and test_sft_baseline_recipes_validate.
+    layer_dirs = [Path("configs/adversarial"), Path("configs/paper_experiments")]
+    return [f for f in config_files + example_files + k8s_files if not any(f.is_relative_to(d) for d in layer_dirs)]
+
+
+SFT_BASELINES = ["multiplication", "countdown", "smiles2formula", "grant_abstracts"]
+
+
+@pytest.mark.parametrize("task", SFT_BASELINES)
+def test_sft_baseline_recipes_validate(task: str):
+    """The SFT baseline configs are layers over their shared base recipe."""
+    base = Path("configs/paper_experiments/sft")
+    args = ["@", (base / "base.toml").as_posix(), "@", (base / f"{task}.toml").as_posix()]
+    cli(SFTConfig, args=args)
 
 
 @pytest.mark.parametrize("config_file", get_config_files(), ids=lambda x: x.as_posix())

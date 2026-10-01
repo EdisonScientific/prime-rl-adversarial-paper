@@ -1,0 +1,39 @@
+output_dir = "outputs/sft-baseline-smiles2formula"
+
+[model]
+name = "Qwen/Qwen3-8B"
+
+[data]
+name = "EdisonScientific/smiles2formula-sft"
+micro_batch_size = 4
+
+[optim]
+lr = 1e-5
+
+[monitors.wandb]
+name = "smiles2formula-qwen3-8b-20ksteps"
+
+[weight_broadcast]
+type = "nccl"
+port = 29701
+
+[eval]
+env_server_base_port = 5200
+
+[[eval.source]]
+name = "smiles2formula"
+env.taskset.id = "smiles2formula"
+env.taskset.split = "validation"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[[eval.source]]
+name = "smiles2formula-train"
+num_examples = 256
+env.taskset.id = "smiles2formula"
+env.taskset.split = "train"
+env.agent.harness.id = "null"
+env.agent.runtime.type = "subprocess"
+
+[inference.server]
+port = 8040

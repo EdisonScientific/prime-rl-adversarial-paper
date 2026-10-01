@@ -42,6 +42,7 @@ trainer = "prime_rl.entrypoints.trainer:main"
 orchestrator = "prime_rl.entrypoints.orchestrator:main"
 evals = "prime_rl.entrypoints.evals:main"
 env-server = "prime_rl.entrypoints.env_server:main"
+adversarial-rl = "prime_rl.entrypoints.adversarial_rl:main"
 dashboard = "prime_rl.entrypoints.dashboard:main"
 
 [project.entry-points."vllm.general_plugins"]
@@ -155,6 +156,7 @@ override-dependencies = [
 # `uv sync --all-packages`.
 [tool.uv.workspace]
 members = [
+    "environments/*",
     "deps/prime-envs/environments/*/*",
     "deps/verifiers/environments/alphabet_sort",
     "deps/verifiers/environments/color_codeword",

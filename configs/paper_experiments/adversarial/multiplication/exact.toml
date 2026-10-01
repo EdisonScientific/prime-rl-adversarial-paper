@@ -1,0 +1,11 @@
+output_dir = "outputs/adversarial-mult-exact"
+generator_reward_mode = "exact_only"
+
+# Freeze the judge: the gate skips every update and nothing ever forces one,
+# so the 0.6B judge only provides (ignored) scoring metrics.
+[judge_update_gate]
+accuracy_threshold = 0.0
+max_skip_streak = "None"
+
+[generator.wandb]
+name = "multiplication-4digit-0.6bgen-exact-b128r8-ipo"

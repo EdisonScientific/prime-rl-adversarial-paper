@@ -6,8 +6,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import final
 
+import torch
 import torch.nn as nn
 from httpx import AsyncClient
+from torch.distributed.checkpoint.filesystem import FileSystemWriter
+from torch.distributed.checkpoint.state_dict_loader import load as dcp_load
+from torch.distributed.checkpoint.state_dict_saver import save as dcp_save
 
 from prime_rl.configs.trainer import WeightBroadcastConfig
 from prime_rl.trainer.world import get_world
@@ -24,6 +28,26 @@ SENDER_READY_MARKER = ".sender_ready"
 RECEIVER_READY_MARKER = ".receiver_ready"
 STARTED_MARKER = ".started"
 FINISHED_MARKER = ".finished"
+
+# Step counter for the EMA target, written by the consumer's driver once per
+# step. A sender that skipped k steps folds them into one decay^k blend at its
+# next broadcast. The weights were frozen in between, so this equals per-step
+# blending.
+EMA_CLOCK_FILE = "ema_clock"
+
+
+def write_ema_clock(broadcast_dir: Path, step: int) -> None:
+    broadcast_dir.mkdir(parents=True, exist_ok=True)
+    tmp_file = broadcast_dir / (EMA_CLOCK_FILE + ".tmp")
+    tmp_file.write_text(str(step))
+    tmp_file.replace(broadcast_dir / EMA_CLOCK_FILE)
+
+
+def read_ema_clock(broadcast_dir: Path) -> int | None:
+    clock_file = broadcast_dir / EMA_CLOCK_FILE
+    if not clock_file.is_file():
+        return None
+    return int(clock_file.read_text())
 
 
 def prune_broadcasts_beyond(output_dir: Path, step: int) -> None:
@@ -44,30 +68,99 @@ class WeightSender(ABC):
     (``.finished``). The trainer therefore runs in lockstep with its consumer
     on every transport — a broadcast nobody receives blocks and then fails."""
 
-    def __init__(self, output_dir: Path, timeout: int):
+    def __init__(self, output_dir: Path, timeout: int, ema_decay: float | None = None):
         self.logger = get_logger()
         self.world = get_world()
         self.output_dir = output_dir
         self.timeout = timeout
+        self.ema_decay = ema_decay
+        self._shadow: list[torch.Tensor] | None = None
+        self._ema_clock: int | None = None
 
     @final
     def broadcast(self, model: nn.Module, step: int) -> None:
         """Broadcast policy v{step} to the inference pool."""
         start_time = time.perf_counter()
-        step_dir = self.step_dir(step)
-        if self.world.is_master:
-            # Reset per attempt so a re-broadcast (e.g. on resume) never trips
-            # the consumer or the trainer on stale markers of a previous run.
-            shutil.rmtree(step_dir, ignore_errors=True)
-            step_dir.mkdir(parents=True)
-            (step_dir / SENDER_READY_MARKER).touch()
-            self._wait_for_receiver_ready(step_dir)
-            (step_dir / STARTED_MARKER).touch()
-        self._broadcast(model, step, step_dir)
+        swapped = self._swap_in_shadow(model)
+        try:
+            step_dir = self.step_dir(step)
+            if self.world.is_master:
+                # Reset per attempt so a re-broadcast (e.g. on resume) never trips
+                # the consumer or the trainer on stale markers of a previous run.
+                shutil.rmtree(step_dir, ignore_errors=True)
+                step_dir.mkdir(parents=True)
+                (step_dir / SENDER_READY_MARKER).touch()
+                self._wait_for_receiver_ready(step_dir)
+                (step_dir / STARTED_MARKER).touch()
+            self._broadcast(model, step, step_dir)
+        finally:
+            if swapped:
+                self._swap_shadow(model)
         if self.world.is_master:
             (step_dir / FINISHED_MARKER).touch()
             self._clean(step)
             self.logger.debug(f"Broadcasted weights for step {step} in {time.perf_counter() - start_time:.2f}s")
+
+    def _swap_in_shadow(self, model: nn.Module) -> bool:
+        """Blend the live weights into the shadow and swap it in for the
+        transfer: consumers serve a slow-moving target while training continues
+        on the live weights. The shadow shards with the model."""
+        if self.ema_decay is None:
+            return False
+        with torch.no_grad():
+            params = [param for param in model.parameters() if param.requires_grad]
+            elapsed = self._advance_ema_clock()
+            if self._shadow is None:
+                self._shadow = [param.detach().clone() for param in params]
+                if self.world.is_master:
+                    self.logger.info(f"Seeded the EMA target shadow from the live weights ({len(params)} tensors)")
+            else:
+                alpha = 1.0 - self.ema_decay**elapsed
+                for shadow, param in zip(self._shadow, params, strict=True):
+                    shadow.lerp_(param.detach(), alpha)
+                if self.world.is_master:
+                    self.logger.debug(
+                        f"EMA target absorbed {elapsed} clock step(s) toward the learner (alpha={alpha:.4f})"
+                    )
+        self._swap_shadow(model)
+        return True
+
+    def save_shadow(self, ckpt_path: Path, threads: int = 1) -> None:
+        """Persist the EMA target with the trainer checkpoint, in bf16, so a
+        resume restores the target instead of re-seeding it."""
+        if self._shadow is None:
+            return
+        state = {str(i): t.to(torch.bfloat16) for i, t in enumerate(self._shadow)}
+        dcp_save(state, storage_writer=FileSystemWriter(ckpt_path / "ema_shadow", thread_count=threads))
+
+    def load_shadow(self, ckpt_path: Path, model: nn.Module) -> bool:
+        shadow_path = ckpt_path / "ema_shadow"
+        if self.ema_decay is None or not (shadow_path / ".metadata").is_file():
+            return False
+        with torch.no_grad():
+            params = [param for param in model.parameters() if param.requires_grad]
+            state = {str(i): param.detach().clone().to(torch.bfloat16) for i, param in enumerate(params)}
+            dcp_load(state, checkpoint_id=shadow_path)
+            self._shadow = [state[str(i)].to(params[i].dtype) for i in range(len(params))]
+        if self.world.is_master:
+            self.logger.info(f"Restored the EMA target shadow from {shadow_path} ({len(self._shadow)} tensors)")
+        return True
+
+    def _advance_ema_clock(self) -> int:
+        """Steps elapsed on the consumer clock since the last broadcast.
+        Defaults to 1 when nobody writes the clock."""
+        clock = read_ema_clock(get_broadcast_dir(self.output_dir))
+        if clock is None:
+            return 1
+        elapsed = clock - self._ema_clock if self._ema_clock is not None else 1
+        self._ema_clock = clock
+        return max(1, elapsed)
+
+    def _swap_shadow(self, model: nn.Module) -> None:
+        assert self._shadow is not None
+        params = [param for param in model.parameters() if param.requires_grad]
+        for idx, param in enumerate(params):
+            self._shadow[idx], param.data = param.data, self._shadow[idx]
 
     def step_dir(self, step: int) -> Path:
         return get_step_path(get_broadcast_dir(self.output_dir), step)

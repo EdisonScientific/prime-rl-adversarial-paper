@@ -1,0 +1,7 @@
+output_dir = "outputs/adversarial-countdown-1p7b4b"
+
+[generator.wandb]
+name = "countdown-1.7bgen-4bjudge-b64r8-ipo"
+
+[judge.model]
+name = "Qwen/Qwen3-4B"

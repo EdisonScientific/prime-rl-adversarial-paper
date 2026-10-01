@@ -267,8 +267,18 @@ def train(config: SFTConfig):
     dp_cp_group = parallel_dims.get_mesh("dp_cp").get_group()
     cp_size = parallel_dims.cp
 
-    def compute_loss(micro_batch: dict) -> tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass returning (loss_sum, token_count) over unmasked tokens."""
+    # Accuracy metrics grade only supervised tokens outside accuracy_ignore_strings (e.g. answer tags).
+    ungraded_token_ids: torch.Tensor | None = None
+    if config.data.accuracy_ignore_strings:
+        ids = {
+            token_id
+            for text in config.data.accuracy_ignore_strings
+            for token_id in tokenizer.encode(text, add_special_tokens=False)
+        }
+        ungraded_token_ids = torch.tensor(sorted(ids), device="cuda")
+
+    def compute_loss(micro_batch: dict) -> tuple[torch.Tensor, ...]:
+        """Forward pass returning loss and accuracy sums over unmasked tokens."""
         input_ids = micro_batch["input_ids"].to("cuda", non_blocking=True)
         position_ids = micro_batch["position_ids"].to("cuda", non_blocking=True)
         target_ids = micro_batch["target_ids"].to("cuda", non_blocking=True)
@@ -325,6 +335,8 @@ def train(config: SFTConfig):
                     mm_token_type_ids=mm_type_ids,
                     seq_lens_are_pre_shard=seq_lens_are_pre_shard,
                 )
+                # p(gold) > 0.5 guarantees the gold token is the argmax.
+                correct_tokens = out["logprobs"] > -math.log(2.0)
                 loss_sum = -out["logprobs"][loss_mask].sum()
             else:
                 out = forward(
@@ -339,11 +351,34 @@ def train(config: SFTConfig):
                 logits = out["logits"]
                 B, L, V = logits.shape
                 token_loss = CrossEntropyLoss(reduction="none")(logits.view(-1, V), target_ids.view(-1)).view(B, L)
+                correct_tokens = token_loss < math.log(2.0)
                 loss_sum = token_loss[loss_mask].sum()
                 del logits
 
         del out
-        return loss_sum, token_count
+        graded_mask = loss_mask
+        if ungraded_token_ids is not None:
+            graded_mask = loss_mask & ~torch.isin(target_ids, ungraded_token_ids)
+        # An answer is correct when every graded token is the argmax, in which
+        # case greedy decoding reproduces its content verbatim.
+        flat_mask = graded_mask.flatten()
+        sample_ids = torch.repeat_interleave(
+            torch.arange(seq_lens.numel(), device=flat_mask.device), seq_lens.flatten()
+        )
+        graded_per_sample = torch.zeros(seq_lens.numel(), dtype=torch.long, device=flat_mask.device)
+        graded_per_sample.scatter_add_(0, sample_ids, flat_mask.long())
+        wrong_per_sample = torch.zeros_like(graded_per_sample)
+        wrong_per_sample.scatter_add_(0, sample_ids, (flat_mask & ~correct_tokens.flatten()).long())
+        graded_samples = graded_per_sample > 0
+        accuracy_sums = torch.stack(
+            [
+                correct_tokens[graded_mask].sum(),
+                graded_mask.sum(),
+                ((wrong_per_sample == 0) & graded_samples).sum(),
+                graded_samples.sum(),
+            ]
+        ).detach()
+        return loss_sum, token_count, accuracy_sums
 
     maybe_record_function = nullcontext
 
@@ -366,7 +401,7 @@ def train(config: SFTConfig):
                 dist.all_reduce(has_data, op=dist.ReduceOp.MIN)
                 if has_data.item() == 0:
                     break
-                loss_sum, token_count = compute_loss(micro_batch)
+                loss_sum, token_count, *_ = compute_loss(micro_batch)
                 if not torch.isnan(loss_sum.detach()):
                     total_loss_sum += loss_sum.detach()
                     total_token_count += token_count
@@ -457,6 +492,8 @@ def train(config: SFTConfig):
         forward_backward_start_time = time.perf_counter()
 
         step_loss_sum = torch.tensor(0.0, device="cuda")
+        # correct tokens, graded tokens, correct answers, graded answers
+        step_accuracy_sums = torch.zeros(4, dtype=torch.int64, device="cuda")
         nan_loss_count = torch.tensor(0, device="cuda")
         is_moe_model = is_tt_moe_model(model)
         moe_stats = (
@@ -498,7 +535,7 @@ def train(config: SFTConfig):
                 )
 
             with maybe_record_function("forward"):
-                local_loss_sum, batch_token_count = compute_loss(micro_batch)
+                local_loss_sum, batch_token_count, local_accuracy_sums = compute_loss(micro_batch)
 
             if gradient_manager is None:
                 step_local_token_count += batch_token_count
@@ -509,6 +546,7 @@ def train(config: SFTConfig):
                 scaled_loss = torch.nan_to_num(local_loss_sum, nan=0.0) / grad_accum_steps
             else:
                 step_loss_sum += local_loss_sum.detach()
+                step_accuracy_sums += local_accuracy_sums
                 scaled_loss = local_loss_sum / grad_accum_steps
 
             with maybe_record_function("backward"):
@@ -544,11 +582,15 @@ def train(config: SFTConfig):
 
         # Compute the global mean loss for logging.
         dist.all_reduce(step_loss_sum, op=dist.ReduceOp.SUM, group=dp_cp_group)
+        dist.all_reduce(step_accuracy_sums, op=dist.ReduceOp.SUM, group=dp_cp_group)
         dist.all_reduce(nan_loss_count, op=dist.ReduceOp.SUM)
         if global_token_count_val > 0:
             batch_loss = (step_loss_sum / global_token_count_val).item()
         else:
             batch_loss = 0.0
+        correct_tokens_sum, graded_tokens, correct_answers, graded_answers = step_accuracy_sums.tolist()
+        batch_token_accuracy = correct_tokens_sum / graded_tokens if graded_tokens > 0 else 0.0
+        batch_answer_accuracy = correct_answers / graded_answers if graded_answers > 0 else 0.0
         nan_loss_count = nan_loss_count.item()
 
         grad_norm: torch.Tensor | None = None
@@ -607,7 +649,10 @@ def train(config: SFTConfig):
 
         # Log step metrics
         step_time = time.perf_counter() - step_start_time
-        step_message = f"Step {progress.step} | {format_time(step_time):>7} | Loss {batch_loss:.4f}"
+        step_message = (
+            f"Step {progress.step} | {format_time(step_time):>7} | Loss {batch_loss:.4f} | "
+            f"Answer Acc. {batch_answer_accuracy:.4f} | Token Acc. {batch_token_accuracy:.4f}"
+        )
         if grad_norm is not None:
             step_message += f" | Grad. Norm {grad_norm:.4f}"
         step_message += f" | LR {current_lr:.2e} | Throughput {throughput:.0f} tokens/s | MFU {mfu:.1f}% | Peak Mem. {peak_memory:.1f}/{max_memory:.1f} GiB ({peak_memory / max_memory * 100:.1f}%)"
@@ -665,6 +710,8 @@ def train(config: SFTConfig):
         loss_log_metrics = {
             "loss/mean": batch_loss,
             "loss/perplexity": math.exp(min(batch_loss, 20)),
+            "loss/token_accuracy": batch_token_accuracy,
+            "loss/answer_accuracy": batch_answer_accuracy,
             "loss/nan_count": nan_loss_count,
             "step": progress.step,
         }
